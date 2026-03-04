@@ -23,8 +23,8 @@
 #include <tensorflow/c/c_api.h>
 
 // ── Configuration ────────────────────────────────────────────────────
-static const char* PATH_TO_MODEL_DIR   = "PaperBasedANNModels/droneInfGraph401092";
-static const char* PATH_TO_LABELS      = "PaperBasedANNModels/droneInfGraph401092/object-detection.pbtxt";
+static const char* PATH_TO_MODEL_DIR   = "model";
+static const char* PATH_TO_LABELS      = "model/object-detection.pbtxt";
 static const float MIN_SCORE_THRESH    = 0.5f;
 static const char* IMAGE_PATH          = "heavy-lift-drone.jpg";
 static const char* OUTPUT_PATH         = "output.jpg";
