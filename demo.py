@@ -5,7 +5,7 @@ import cv2
 import numpy as np
 
 # ── Configuration ──────────────────────────────────────────────────────
-PATH_TO_MODEL_DIR = 'PaperBasedANNModels/droneInfGraph401092'
+PATH_TO_MODEL_DIR = 'model'
 PATH_TO_SAVED_MODEL = PATH_TO_MODEL_DIR + '/saved_model'
 PATH_TO_LABELS = PATH_TO_MODEL_DIR + '/object-detection.pbtxt'
 MIN_SCORE_THRESH = 0.5   # Only show detections above this confidence
