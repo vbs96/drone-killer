@@ -10,8 +10,10 @@ pip install -U pip wheel
 pip install "transformers>=4.41" "optimum[onnxruntime]>=1.20" onnxruntime soundfile librosa numpy
 
 # Export the model to ONNX (do this once)
-pip install transformers librosa soundfile numpy
-pip install torch --index-url https://download.pytorch.org/whl/cpu
+optimum-cli export onnx \
+  --model preszzz/drone-audio-detection-05-17-trial-0 \
+  --task audio-classification \
+  onnx_drone_model
 
 # Running:
 
