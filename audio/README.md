@@ -21,7 +21,7 @@ source .venv/bin/activate
 mkfifo /tmp/sim_mic_fifo
 
 ## Terminal1
-python3 micsim_v2.py \
+python3 micsim.py \
   --background samples/noise2.wav \
   --drone samples/drone1.wav \
   --event-every 20 \

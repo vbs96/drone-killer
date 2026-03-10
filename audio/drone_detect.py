@@ -5,6 +5,7 @@ from collections import deque
 from typing import List
 
 import numpy as np
+import librosa
 
 from optimum.onnxruntime import ORTModelForAudioClassification
 from transformers import AutoFeatureExtractor, pipeline
@@ -39,17 +40,126 @@ def score_chunk(clf, chunk: np.ndarray, sr: int, drone_label: str) -> float:
     return 0.0
 
 
+def rms_normalize(y: np.ndarray, target_rms: float = 0.08, eps: float = 1e-8) -> np.ndarray:
+    rms = np.sqrt(np.mean(y * y) + eps)
+    gain = target_rms / max(rms, eps)
+    y = y * gain
+    return np.clip(y, -1.0, 1.0).astype(np.float32)
+
+
+def highpass_fft(y: np.ndarray, sr: int, cutoff_hz: float = 150.0) -> np.ndarray:
+    """
+    Simple FFT-domain high-pass filter.
+    Good enough for MVP to remove low-frequency rumble.
+    """
+    Y = np.fft.rfft(y)
+    freqs = np.fft.rfftfreq(len(y), d=1.0 / sr)
+    Y[freqs < cutoff_hz] = 0
+    out = np.fft.irfft(Y, n=len(y))
+    return out.astype(np.float32)
+
+
+class SpectralNoiseReducer:
+    """
+    Keeps a running estimate of background magnitude spectrum and subtracts it.
+    """
+    def __init__(self, sr: int, n_fft: int = 1024, hop_length: int = 256, alpha: float = 1.5, floor: float = 0.05):
+        self.sr = sr
+        self.n_fft = n_fft
+        self.hop_length = hop_length
+        self.alpha = alpha
+        self.floor = floor
+        self.noise_mag = None
+
+    def update_noise_profile(self, y: np.ndarray):
+        D = librosa.stft(y, n_fft=self.n_fft, hop_length=self.hop_length)
+        mag = np.abs(D)
+        current = mag.mean(axis=1, keepdims=True)
+
+        if self.noise_mag is None:
+            self.noise_mag = current
+        else:
+            # Slow EMA so profile adapts gently
+            self.noise_mag = 0.95 * self.noise_mag + 0.05 * current
+
+    def reduce(self, y: np.ndarray) -> np.ndarray:
+        if self.noise_mag is None:
+            return y.astype(np.float32)
+
+        D = librosa.stft(y, n_fft=self.n_fft, hop_length=self.hop_length)
+        mag = np.abs(D)
+        phase = np.angle(D)
+
+        clean_mag = mag - self.alpha * self.noise_mag
+        clean_mag = np.maximum(clean_mag, self.floor * mag)
+
+        D_clean = clean_mag * np.exp(1j * phase)
+        y_clean = librosa.istft(D_clean, hop_length=self.hop_length, length=len(y))
+        return np.clip(y_clean, -1.0, 1.0).astype(np.float32)
+
+
+def preprocess_window(
+    y: np.ndarray,
+    sr: int,
+    noise_reducer: SpectralNoiseReducer,
+    prev_decision: str,
+    low_score_bg_update: bool,
+    raw_score_hint: float,
+    hp_cutoff: float,
+    target_rms: float,
+) -> np.ndarray:
+    """
+    Light background suppression pipeline:
+    1. DC removal
+    2. High-pass filter
+    3. Update noise profile only in probable background windows
+    4. Spectral subtraction
+    5. RMS normalization
+    """
+    x = y.astype(np.float32).copy()
+
+    # 1) Remove DC
+    x = x - np.mean(x)
+
+    # 2) High-pass to remove rumble
+    x = highpass_fft(x, sr, cutoff_hz=hp_cutoff)
+
+    # 3) Update background model only when likely background
+    should_update_bg = (prev_decision != "drone")
+    if low_score_bg_update:
+        should_update_bg = should_update_bg and (raw_score_hint < 0.20)
+
+    if should_update_bg:
+        noise_reducer.update_noise_profile(x)
+
+    # 4) Spectral subtraction
+    x = noise_reducer.reduce(x)
+
+    # 5) Normalize
+    x = rms_normalize(x, target_rms=target_rms)
+
+    return x
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--input-fifo", required=True)
     ap.add_argument("--onnx_dir", default="onnx_drone_model")
     ap.add_argument("--sr", type=int, default=16000)
-    ap.add_argument("--win", type=float, default=5.0)
-    ap.add_argument("--hop", type=float, default=1.0)
-    ap.add_argument("--threshold", type=float, default=0.7)
+    ap.add_argument("--win", type=float, default=2.0)
+    ap.add_argument("--hop", type=float, default=0.5)
+    ap.add_argument("--threshold", type=float, default=0.5)
     ap.add_argument("--history", type=int, default=5)
     ap.add_argument("--chunk-ms", type=int, default=100)
     ap.add_argument("--out", default="")
+
+    # Preprocessing params
+    ap.add_argument("--hp-cutoff", type=float, default=150.0, help="High-pass cutoff frequency in Hz")
+    ap.add_argument("--target-rms", type=float, default=0.08, help="Target RMS after normalization")
+    ap.add_argument("--noise-alpha", type=float, default=1.5, help="Spectral subtraction strength")
+    ap.add_argument("--noise-floor", type=float, default=0.05, help="Residual floor to avoid artifacts")
+    ap.add_argument("--strict-bg-update", action="store_true", help="Update noise profile only when score is very low")
+
     args = ap.parse_args()
 
     feature_extractor = AutoFeatureExtractor.from_pretrained(args.onnx_dir)
@@ -64,6 +174,14 @@ def main():
 
     drone_label = find_drone_label(ort_model)
 
+    noise_reducer = SpectralNoiseReducer(
+        sr=args.sr,
+        n_fft=1024,
+        hop_length=256,
+        alpha=args.noise_alpha,
+        floor=args.noise_floor,
+    )
+
     win_samples = int(args.win * args.sr)
     hop_samples = int(args.hop * args.sr)
     chunk_samples = int(args.sr * (args.chunk_ms / 1000.0))
@@ -73,8 +191,10 @@ def main():
     filled = 0
     since_last_infer = 0
     stream_time_s = 0.0
+
     recent_scores = deque(maxlen=args.history)
     prev_decision = None
+    prev_raw_score = 0.0
 
     out_file = open(args.out, "a", encoding="utf-8") if args.out else None
 
@@ -85,7 +205,6 @@ def main():
         with open(args.input_fifo, "rb") as f:
             while True:
                 raw = f.read(chunk_bytes)
-                print(f"read bytes: {len(raw)}")
                 if not raw or len(raw) < chunk_bytes:
                     continue
 
@@ -108,9 +227,26 @@ def main():
 
                 since_last_infer = 0
 
-                raw_score = score_chunk(clf, ring_buffer, args.sr, drone_label)
+                # Preprocess current window before inference
+                proc_window = preprocess_window(
+                    y=ring_buffer,
+                    sr=args.sr,
+                    noise_reducer=noise_reducer,
+                    prev_decision=prev_decision or "no_drone",
+                    low_score_bg_update=args.strict_bg_update,
+                    raw_score_hint=prev_raw_score,
+                    hp_cutoff=args.hp_cutoff,
+                    target_rms=args.target_rms,
+                )
+
+                raw_score = score_chunk(clf, proc_window, args.sr, drone_label)
+                prev_raw_score = raw_score
+
                 recent_scores.append(raw_score)
-                smoothed_score = percentile_aggregate(list(recent_scores), q=90.0)
+
+                # More responsive than percentile for short mixed events
+                smoothed_score = max(recent_scores) if recent_scores else raw_score
+
                 decision = "drone" if smoothed_score >= args.threshold else "no_drone"
 
                 event = {
@@ -135,6 +271,7 @@ def main():
                     f"raw={raw_score:.3f} smooth={smoothed_score:.3f} "
                     f"decision={decision}"
                 )
+
                 prev_decision = decision
 
     finally:
