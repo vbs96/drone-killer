@@ -74,6 +74,7 @@ def main():
     since_last_infer = 0
     stream_time_s = 0.0
     recent_scores = deque(maxlen=args.history)
+    prev_decision = None
 
     out_file = open(args.out, "a", encoding="utf-8") if args.out else None
 
@@ -134,6 +135,7 @@ def main():
                     f"raw={raw_score:.3f} smooth={smoothed_score:.3f} "
                     f"decision={decision}"
                 )
+                prev_decision = decision
 
     finally:
         if out_file:
