@@ -46,6 +46,23 @@ def rms_normalize(y: np.ndarray, target_rms: float = 0.08, eps: float = 1e-8) ->
     y = y * gain
     return np.clip(y, -1.0, 1.0).astype(np.float32)
 
+def save_wav(path: str, y: np.ndarray, sr: int):
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    sf.write(path, y, sr)
+
+
+def post_detection(server_url: str, metadata: dict, audio_path: str):
+    with open(audio_path, "rb") as f:
+        files = {
+            "audio": (os.path.basename(audio_path), f, "audio/wav")
+        }
+        data = {
+            "metadata": json.dumps(metadata)
+        }
+        resp = requests.post(server_url, data=data, files=files, timeout=10)
+        resp.raise_for_status()
+        return resp.json()
+
 
 def highpass_fft(y: np.ndarray, sr: int, cutoff_hz: float = 150.0) -> np.ndarray:
     """
@@ -196,6 +213,8 @@ def main():
     prev_decision = None
     prev_raw_score = 0.0
 
+    gps_lat, gps_lon = 0.0, 0.0  # Placeholder GPS coordinates
+
     out_file = open(args.out, "a", encoding="utf-8") if args.out else None
 
     print(f"Listening on FIFO: {args.input_fifo}")
@@ -271,6 +290,32 @@ def main():
                     f"raw={raw_score:.3f} smooth={smoothed_score:.3f} "
                     f"decision={decision}"
                 )
+                # Only post on transition into drone state
+                if decision == "drone" and prev_decision != "drone":
+                    timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+                    clip_path = os.path.join(args.clip_dir, f"drone_detected_{timestamp}.wav")
+                    save_wav(clip_path, window, args.sr)
+
+                    metadata = {
+                        "timestamp": datetime.now(timezone.utc).isoformat(),
+                        "gps": {
+                            "lat": gps_lat,
+                            "lon": gps_lon,
+                        },
+                        "event": "drone detected",
+                        "type": "fpv",
+                        "confidence": smoothed_score,
+                        "window": {
+                            "t_start": event["t_start"],
+                            "t_end": event["t_end"],
+                        },
+                    }
+
+                    try:
+                        response_json = post_detection(server_url, metadata, clip_path)
+                        print(f"POST OK: {response_json}")
+                    except Exception as e:
+                        print(f"POST FAILED: {e}")
 
                 prev_decision = decision
 
