@@ -74,7 +74,6 @@ def main():
     since_last_infer = 0
     stream_time_s = 0.0
     recent_scores = deque(maxlen=args.history)
-    prev_decision = None
 
     out_file = open(args.out, "a", encoding="utf-8") if args.out else None
 
@@ -85,6 +84,7 @@ def main():
         with open(args.input_fifo, "rb") as f:
             while True:
                 raw = f.read(chunk_bytes)
+                print(f"read bytes: {len(raw)}")
                 if not raw or len(raw) < chunk_bytes:
                     continue
 
@@ -124,14 +124,16 @@ def main():
                     out_file.write(json.dumps(event) + "\n")
                     out_file.flush()
 
-                if decision != prev_decision:
-                    marker = "🚨" if decision == "drone" else "·"
-                    print(
-                        f"{marker} window=({event['t_start']:.2f}s-{event['t_end']:.2f}s) "
-                        f"raw={raw_score:.3f} smooth={smoothed_score:.3f} "
-                        f"decision={decision}"
-                    )
-                    prev_decision = decision
+                marker = "🚨" if decision == "drone" else "·"
+                changed = decision != prev_decision
+                change_tag = " CHANGE" if changed else ""
+
+                print(
+                    f"{marker}{change_tag} "
+                    f"window=({event['t_start']:.2f}s-{event['t_end']:.2f}s) "
+                    f"raw={raw_score:.3f} smooth={smoothed_score:.3f} "
+                    f"decision={decision}"
+                )
 
     finally:
         if out_file:
