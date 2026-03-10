@@ -35,4 +35,9 @@ python3 micsim_v2.py \
   > /tmp/sim_mic_fifo
 
 ## Terminal2
-python3 drone_detect_live.py --input-fifo /tmp/sim_mic_fifo --onnx_dir onnx_drone_model
+python3 drone_detect_live.py \
+  --input-fifo /tmp/sim_mic_fifo \
+  --onnx_dir onnx_drone_model \
+  --win 2.0 \
+  --hop 0.5 \
+  --threshold 0.5
