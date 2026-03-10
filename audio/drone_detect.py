@@ -181,7 +181,8 @@ def main():
     ap.add_argument("--noise-alpha", type=float, default=1.5, help="Spectral subtraction strength")
     ap.add_argument("--noise-floor", type=float, default=0.05, help="Residual floor to avoid artifacts")
     ap.add_argument("--strict-bg-update", action="store_true", help="Update noise profile only when score is very low")
-
+    ap.add_argument("--clip-dir", default="detected_clips")
+    
     args = ap.parse_args()
 
     feature_extractor = AutoFeatureExtractor.from_pretrained(args.onnx_dir)
