@@ -40,4 +40,9 @@ python3 drone_detect.py \
   --onnx_dir onnx_drone_model \
   --win 2.0 \
   --hop 0.5 \
-  --threshold 0.5
+  --threshold 0.5 \
+  --hp-cutoff 150 \
+  --target-rms 0.08 \
+  --noise-alpha 1.5 \
+  --noise-floor 0.05 \
+  --strict-bg-update
