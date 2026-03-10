@@ -189,7 +189,8 @@ class SimMicV2:
                 drone_chunk = self._drone_chunk_with_envelope(event, now_stream_t, self.chunk_size)
                 gain_now = self._event_gain_at(event, now_stream_t)
 
-                out = bg_chunk + drone_chunk
+                # During an event, drone audio replaces background instead of overlaying it.
+                out = drone_chunk
                 meta.update({
                     "event_active": True,
                     "event_peak_gain": event.peak_gain,
