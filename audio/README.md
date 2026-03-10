@@ -18,4 +18,10 @@ optimum-cli export onnx \
 # Running:
 
 source .venv/bin/activate
-python3 drone_detect.py ./test.wav --out result.json
+mkfifo /tmp/sim_mic_fifo
+
+## Terminal1
+python3 micsim.py --background background.wav --drone drone.wav > /tmp/sim_mic_fifo
+
+## Terminal2
+python3 drone_detect_live.py --input-fifo /tmp/sim_mic_fifo --onnx_dir onnx_drone_model
