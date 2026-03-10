@@ -22,8 +22,8 @@ mkfifo /tmp/sim_mic_fifo
 
 ## Terminal1
 python3 micsim_v2.py \
-  --background bg1.wav bg2.wav bg3.wav \
-  --drone drone.wav \
+  --background samples/noise2.wav \
+  --drone samples/drone1.wav \
   --event-every 20 \
   --event-duration-min 8 \
   --event-duration-max 14 \
@@ -35,7 +35,7 @@ python3 micsim_v2.py \
   > /tmp/sim_mic_fifo
 
 ## Terminal2
-python3 drone_detect_live.py \
+python3 drone_detect.py \
   --input-fifo /tmp/sim_mic_fifo \
   --onnx_dir onnx_drone_model \
   --win 2.0 \
