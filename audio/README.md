@@ -21,7 +21,18 @@ source .venv/bin/activate
 mkfifo /tmp/sim_mic_fifo
 
 ## Terminal1
-python3 micsim.py --background background.wav --drone drone.wav > /tmp/sim_mic_fifo
+python3 micsim_v2.py \
+  --background bg1.wav bg2.wav bg3.wav \
+  --drone drone.wav \
+  --event-every 20 \
+  --event-duration-min 8 \
+  --event-duration-max 14 \
+  --fade-min 1.5 \
+  --fade-max 3 \
+  --peak-gain-min 0.2 \
+  --peak-gain-max 0.75 \
+  --bg-gain 0.9 \
+  > /tmp/sim_mic_fifo
 
 ## Terminal2
 python3 drone_detect_live.py --input-fifo /tmp/sim_mic_fifo --onnx_dir onnx_drone_model
