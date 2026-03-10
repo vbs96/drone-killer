@@ -119,50 +119,6 @@ class SpectralNoiseReducer:
         y_clean = librosa.istft(D_clean, hop_length=self.hop_length, length=len(y))
         return np.clip(y_clean, -1.0, 1.0).astype(np.float32)
 
-
-def preprocess_window(
-    y: np.ndarray,
-    sr: int,
-    noise_reducer: SpectralNoiseReducer,
-    prev_decision: str,
-    low_score_bg_update: bool,
-    raw_score_hint: float,
-    hp_cutoff: float,
-    target_rms: float,
-) -> np.ndarray:
-    """
-    Light background suppression pipeline:
-    1. DC removal
-    2. High-pass filter
-    3. Update noise profile only in probable background windows
-    4. Spectral subtraction
-    5. RMS normalization
-    """
-    x = y.astype(np.float32).copy()
-
-    # 1) Remove DC
-    x = x - np.mean(x)
-
-    # 2) High-pass to remove rumble
-    x = highpass_fft(x, sr, cutoff_hz=hp_cutoff)
-
-    # 3) Update background model only when likely background
-    should_update_bg = (prev_decision != "drone")
-    if low_score_bg_update:
-        should_update_bg = should_update_bg and (raw_score_hint < 0.20)
-
-    if should_update_bg:
-        noise_reducer.update_noise_profile(x)
-
-    # 4) Spectral subtraction
-    x = noise_reducer.reduce(x)
-
-    # 5) Normalize
-    x = rms_normalize(x, target_rms=target_rms)
-
-    return x
-
-
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--input-fifo", required=True)
@@ -182,7 +138,7 @@ def main():
     ap.add_argument("--noise-floor", type=float, default=0.05, help="Residual floor to avoid artifacts")
     ap.add_argument("--strict-bg-update", action="store_true", help="Update noise profile only when score is very low")
     ap.add_argument("--clip-dir", default="detected_clips")
-    
+
     args = ap.parse_args()
 
     feature_extractor = AutoFeatureExtractor.from_pretrained(args.onnx_dir)
@@ -250,21 +206,13 @@ def main():
                 if filled < win_samples or since_last_infer < hop_samples:
                     continue
 
+                window = ring_buffer.copy().astype(np.float32)
+                window = window - np.mean(window)
+                window = rms_normalize(window, target_rms=0.08)
+
                 since_last_infer = 0
 
-                # Preprocess current window before inference
-                proc_window = preprocess_window(
-                    y=ring_buffer,
-                    sr=args.sr,
-                    noise_reducer=noise_reducer,
-                    prev_decision=prev_decision or "no_drone",
-                    low_score_bg_update=args.strict_bg_update,
-                    raw_score_hint=prev_raw_score,
-                    hp_cutoff=args.hp_cutoff,
-                    target_rms=args.target_rms,
-                )
-
-                raw_score = score_chunk(clf, proc_window, args.sr, drone_label)
+                raw_score = score_chunk(clf, window, args.sr, drone_label)
                 prev_raw_score = raw_score
 
                 recent_scores.append(raw_score)
