@@ -46,3 +46,6 @@ python3 drone_detect.py \
   --noise-alpha 1.5 \
   --noise-floor 0.05 \
   --strict-bg-update
+
+  
+Use --mic for mic input
