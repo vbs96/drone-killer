@@ -22,6 +22,9 @@ app.use((req, res, next) => {
 const uploadDir = path.join(__dirname, "uploads");
 fs.mkdirSync(uploadDir, { recursive: true });
 
+// Serve saved audio files so marker popups can preview them in the frontend.
+app.use("/uploads", express.static(uploadDir));
+
 const eventsStore = {
   byId: {},
   allIds: [],

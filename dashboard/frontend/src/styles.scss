@@ -9,3 +9,23 @@ body {
 body {
 	font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
 }
+
+.event-popup {
+	min-width: 240px;
+}
+
+.event-popup-time {
+	margin-top: 0.25rem;
+	margin-bottom: 0.5rem;
+	color: #445a73;
+	font-size: 0.8rem;
+}
+
+.event-popup-audio {
+	width: 100%;
+}
+
+.event-popup-noaudio {
+	color: #6f8199;
+	font-size: 0.8rem;
+}

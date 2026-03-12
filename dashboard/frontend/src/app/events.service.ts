@@ -17,6 +17,7 @@ interface EventsResponse {
 
 @Injectable({ providedIn: 'root' })
 export class EventsService {
+  readonly backendBaseUrl = 'http://localhost:8001';
   readonly eventsUrl = 'http://localhost:8001/events';
 
   constructor(private readonly http: HttpClient) {}
@@ -29,5 +30,18 @@ export class EventsService {
 
   pollEvents(intervalMs = 3000): Observable<BackendEvent[]> {
     return timer(0, intervalMs).pipe(switchMap(() => this.getEvents()));
+  }
+
+  toAbsoluteBackendUrl(urlPath: string | null): string | null {
+    if (!urlPath) {
+      return null;
+    }
+
+    if (/^https?:\/\//i.test(urlPath)) {
+      return urlPath;
+    }
+
+    const normalizedPath = urlPath.startsWith('/') ? urlPath : `/${urlPath}`;
+    return `${this.backendBaseUrl}${normalizedPath}`;
   }
 }

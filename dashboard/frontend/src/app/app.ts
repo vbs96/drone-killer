@@ -65,8 +65,7 @@ export class App implements AfterViewInit, OnDestroy {
         continue;
       }
 
-      const coordinates = [eventRecord.metadata.gps.lon, eventRecord.metadata.gps.lat] as [number, number] | null;
-      console.log(eventRecord.metadata)
+      const coordinates = this.extractCoordinates(eventRecord.metadata);
 
       if (!coordinates) {
         continue;
@@ -74,11 +73,7 @@ export class App implements AfterViewInit, OnDestroy {
 
       const marker = new maplibregl.Marker({ color: '#ff6a3d' })
         .setLngLat(coordinates)
-        .setPopup(
-          new maplibregl.Popup({ offset: 24 }).setText(
-            `Event ${eventRecord.id.slice(0, 8)}\n${eventRecord.receivedAt}`
-          )
-        )
+        .setPopup(new maplibregl.Popup({ offset: 24 }).setDOMContent(this.buildPopupContent(eventRecord)))
         .addTo(this.map);
 
       this.markersByEventId.set(eventRecord.id, marker);
@@ -92,6 +87,81 @@ export class App implements AfterViewInit, OnDestroy {
       marker.remove();
       this.markersByEventId.delete(eventId);
     }
+  }
+
+  private buildPopupContent(eventRecord: BackendEvent): HTMLElement {
+    const root = document.createElement('div');
+    root.className = 'event-popup';
+
+    const title = document.createElement('strong');
+    title.textContent = `Event ${eventRecord.id.slice(0, 8)}`;
+    root.appendChild(title);
+
+    const time = document.createElement('div');
+    time.textContent = new Date(eventRecord.receivedAt).toLocaleString();
+    time.className = 'event-popup-time';
+    root.appendChild(time);
+
+    const audioUrl = this.eventsService.toAbsoluteBackendUrl(eventRecord.audioPath);
+    if (audioUrl) {
+      const audio = document.createElement('audio');
+      audio.controls = true;
+      audio.preload = 'none';
+      audio.src = audioUrl;
+      audio.className = 'event-popup-audio';
+      root.appendChild(audio);
+    } else {
+      const noAudio = document.createElement('div');
+      noAudio.textContent = 'No audio uploaded for this event.';
+      noAudio.className = 'event-popup-noaudio';
+      root.appendChild(noAudio);
+    }
+
+    return root;
+  }
+
+  private extractCoordinates(metadata: unknown): [number, number] | null {
+    if (!metadata || typeof metadata !== 'object') {
+      return null;
+    }
+
+    const metadataObject = metadata as Record<string, unknown>;
+    const gps = metadataObject['gps'];
+    if (gps && typeof gps === 'object') {
+      const gpsObject = gps as Record<string, unknown>;
+      const lat = this.readNumber(gpsObject, ['lat', 'latitude']);
+      const lon = this.readNumber(gpsObject, ['lon', 'lng', 'longitude', 'long']);
+      if (lat !== null && lon !== null) {
+        return [lon, lat];
+      }
+    }
+
+    const candidates: Record<string, unknown>[] = [metadataObject];
+    const location = metadataObject['location'];
+    if (location && typeof location === 'object') {
+      candidates.push(location as Record<string, unknown>);
+    }
+
+    for (const candidate of candidates) {
+      const lat = this.readNumber(candidate, ['lat', 'latitude']);
+      const lng = this.readNumber(candidate, ['lng', 'lon', 'longitude', 'long']);
+      if (lat !== null && lng !== null) {
+        return [lng, lat];
+      }
+
+      const coordinates = candidate['coordinates'];
+      if (!Array.isArray(coordinates) || coordinates.length < 2) {
+        continue;
+      }
+
+      const lngFromArray = Number(coordinates[0]);
+      const latFromArray = Number(coordinates[1]);
+      if (Number.isFinite(lngFromArray) && Number.isFinite(latFromArray)) {
+        return [lngFromArray, latFromArray];
+      }
+    }
+
+    return null;
   }
 
   private readNumber(source: Record<string, unknown>, keys: string[]): number | null {
