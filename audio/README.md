@@ -1,13 +1,13 @@
 # Setup
 
 sudo apt update
-sudo apt install -y python3-pip python3-venv ffmpeg sounddevice
+sudo apt install -y python3-pip python3-venv ffmpeg portaudio19-dev
 
 python3 -m venv .venv
 source .venv/bin/activate
 
 pip install -U pip wheel
-pip install "transformers>=4.41" "optimum[onnxruntime]>=1.20" onnxruntime soundfile librosa numpy
+pip install "transformers>=4.41" "optimum[onnxruntime]>=1.20" onnxruntime soundfile librosa numpy sounddevice
 
 # Export the model to ONNX (do this once)
 optimum-cli export onnx \

@@ -81,75 +81,33 @@ def highpass_fft(y: np.ndarray, sr: int, cutoff_hz: float = 150.0) -> np.ndarray
     out = np.fft.irfft(Y, n=len(y))
     return out.astype(np.float32)
 
+def audio_chunks_from_fifo(input_fifo: str, chunk_bytes: int):
+    with open(input_fifo, "rb") as f:
+        while True:
+            raw = f.read(chunk_bytes)
+            if not raw or len(raw) < chunk_bytes:
+                continue
+            yield np.frombuffer(raw, dtype=np.float32)
 
-class SpectralNoiseReducer:
-    """
-    Keeps a running estimate of background magnitude spectrum and subtracts it.
-    """
-    def __init__(self, sr: int, n_fft: int = 1024, hop_length: int = 256, alpha: float = 1.5, floor: float = 0.05):
-        self.sr = sr
-        self.n_fft = n_fft
-        self.hop_length = hop_length
-        self.alpha = alpha
-        self.floor = floor
-        self.noise_mag = None
-
-    def update_noise_profile(self, y: np.ndarray):
-        D = librosa.stft(y, n_fft=self.n_fft, hop_length=self.hop_length)
-        mag = np.abs(D)
-        current = mag.mean(axis=1, keepdims=True)
-
-        if self.noise_mag is None:
-            self.noise_mag = current
-        else:
-            # Slow EMA so profile adapts gently
-            self.noise_mag = 0.95 * self.noise_mag + 0.05 * current
-
-    def reduce(self, y: np.ndarray) -> np.ndarray:
-        if self.noise_mag is None:
-            return y.astype(np.float32)
-
-        D = librosa.stft(y, n_fft=self.n_fft, hop_length=self.hop_length)
-        mag = np.abs(D)
-        phase = np.angle(D)
-
-        clean_mag = mag - self.alpha * self.noise_mag
-        clean_mag = np.maximum(clean_mag, self.floor * mag)
-
-        D_clean = clean_mag * np.exp(1j * phase)
-        y_clean = librosa.istft(D_clean, hop_length=self.hop_length, length=len(y))
-        return np.clip(y_clean, -1.0, 1.0).astype(np.float32)
-
-    def audio_chunks_from_fifo(input_fifo: str, chunk_bytes: int):
-        with open(input_fifo, "rb") as f:
-            while True:
-                raw = f.read(chunk_bytes)
-                if not raw or len(raw) < chunk_bytes:
-                    continue
-                yield np.frombuffer(raw, dtype=np.float32)
-
-    def audio_chunks_from_mic(sr: int, chunk_samples: int, device=None, channels: int = 1):
-        with sd.InputStream(
-            samplerate=sr,
-            channels=channels,
-            dtype="float32",
-            blocksize=chunk_samples,
-            device=device,
-        ) as stream:
-            while True:
-                data, overflowed = stream.read(chunk_samples)
-
-                if overflowed:
-                    print("Warning: microphone input overflowed")
-
-                # data shape: (frames, channels)
-                if channels > 1:
-                    chunk = np.mean(data, axis=1, dtype=np.float32)
-                else:
-                    chunk = data[:, 0].astype(np.float32)
-
-                yield chunk
-
+def audio_chunks_from_mic(sr: int, chunk_samples: int, device=None, channels: int = 1):
+    with sd.InputStream(
+        samplerate=sr,
+        channels=channels,
+        dtype="float32",
+        blocksize=chunk_samples,
+        device=device,
+    ) as stream:
+        while True:
+            data, overflowed = stream.read(chunk_samples)
+            if overflowed:
+                print("Warning: microphone input overflowed")
+            # data shape: (frames, channels)
+            if channels > 1:
+                chunk = np.mean(data, axis=1, dtype=np.float32)
+            else:
+                chunk = data[:, 0].astype(np.float32)
+            yield chunk
+            
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--input-fifo", required=None)
@@ -190,14 +148,6 @@ def main():
     )
 
     drone_label = find_drone_label(ort_model)
-
-    noise_reducer = SpectralNoiseReducer(
-        sr=args.sr,
-        n_fft=1024,
-        hop_length=256,
-        alpha=args.noise_alpha,
-        floor=args.noise_floor,
-    )
 
     win_samples = int(args.win * args.sr)
     hop_samples = int(args.hop * args.sr)
