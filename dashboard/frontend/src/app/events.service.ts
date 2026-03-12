@@ -5,7 +5,7 @@ import { map, Observable, switchMap, timer } from 'rxjs';
 export interface BackendEvent {
   id: string;
   receivedAt: string;
-  metadata: unknown;
+  metadata: any;
   audioPath: string | null;
 }
 

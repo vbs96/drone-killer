@@ -65,7 +65,9 @@ export class App implements AfterViewInit, OnDestroy {
         continue;
       }
 
-      const coordinates = this.extractCoordinates(eventRecord.metadata);
+      const coordinates = [eventRecord.metadata.gps.lon, eventRecord.metadata.gps.lat] as [number, number] | null;
+      console.log(eventRecord.metadata)
+
       if (!coordinates) {
         continue;
       }
@@ -90,43 +92,6 @@ export class App implements AfterViewInit, OnDestroy {
       marker.remove();
       this.markersByEventId.delete(eventId);
     }
-  }
-
-  private extractCoordinates(metadata: unknown): [number, number] | null {
-    if (!metadata || typeof metadata !== 'object') {
-      return null;
-    }
-
-    const metadataObject = metadata as Record<string, unknown>;
-    const candidates: Record<string, unknown>[] = [metadataObject];
-    const location = metadataObject['location'];
-
-    if (location && typeof location === 'object') {
-      candidates.push(location as Record<string, unknown>);
-    }
-
-    for (const candidate of candidates) {
-      const lat = this.readNumber(candidate, ['lat', 'latitude']);
-      const lng = this.readNumber(candidate, ['lng', 'lon', 'longitude', 'long']);
-
-      if (lat !== null && lng !== null) {
-        return [lng, lat];
-      }
-
-      const coordinates = candidate['coordinates'];
-      if (!Array.isArray(coordinates) || coordinates.length < 2) {
-        continue;
-      }
-
-      const lngFromArray = Number(coordinates[0]);
-      const latFromArray = Number(coordinates[1]);
-
-      if (Number.isFinite(lngFromArray) && Number.isFinite(latFromArray)) {
-        return [lngFromArray, latFromArray];
-      }
-    }
-
-    return null;
   }
 
   private readNumber(source: Record<string, unknown>, keys: string[]): number | null {
