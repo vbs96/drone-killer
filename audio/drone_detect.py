@@ -15,6 +15,7 @@ import librosa
 from optimum.onnxruntime import ORTModelForAudioClassification
 from transformers import AutoFeatureExtractor, pipeline
 
+import sounddevice as sd
 
 def percentile_aggregate(scores: List[float], q: float = 90.0) -> float:
     if not scores:
@@ -119,9 +120,43 @@ class SpectralNoiseReducer:
         y_clean = librosa.istft(D_clean, hop_length=self.hop_length, length=len(y))
         return np.clip(y_clean, -1.0, 1.0).astype(np.float32)
 
+    def audio_chunks_from_fifo(input_fifo: str, chunk_bytes: int):
+        with open(input_fifo, "rb") as f:
+            while True:
+                raw = f.read(chunk_bytes)
+                if not raw or len(raw) < chunk_bytes:
+                    continue
+                yield np.frombuffer(raw, dtype=np.float32)
+
+    def audio_chunks_from_mic(sr: int, chunk_samples: int, device=None, channels: int = 1):
+        with sd.InputStream(
+            samplerate=sr,
+            channels=channels,
+            dtype="float32",
+            blocksize=chunk_samples,
+            device=device,
+        ) as stream:
+            while True:
+                data, overflowed = stream.read(chunk_samples)
+
+                if overflowed:
+                    print("Warning: microphone input overflowed")
+
+                # data shape: (frames, channels)
+                if channels > 1:
+                    chunk = np.mean(data, axis=1, dtype=np.float32)
+                else:
+                    chunk = data[:, 0].astype(np.float32)
+
+                yield chunk
+
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--input-fifo", required=True)
+    ap.add_argument("--input-fifo", required=None)
+    ap.add_argument("--mic", action="store_true", help="Read audio from microphone instead of FIFO")
+    ap.add_argument("--device", default=None, help="Input device name or index for microphone")
+    ap.add_argument("--channels", type=int, default=1, help="Number of input channels")
+
     ap.add_argument("--onnx_dir", default="onnx_drone_model")
     ap.add_argument("--sr", type=int, default=16000)
     ap.add_argument("--win", type=float, default=2.0)
@@ -140,6 +175,9 @@ def main():
     ap.add_argument("--clip-dir", default="detected_clips")
 
     args = ap.parse_args()
+
+    if not args.mic and not args.input_fifo:
+        ap.error("Either --mic or --input-fifo must be provided")
 
     feature_extractor = AutoFeatureExtractor.from_pretrained(args.onnx_dir)
     ort_model = ORTModelForAudioClassification.from_pretrained(args.onnx_dir)
@@ -179,100 +217,105 @@ def main():
     server_url = "http://2doorspacemachine.local:8001/events"  # Placeholder server URL
     out_file = open(args.out, "a", encoding="utf-8") if args.out else None
 
-    print(f"Listening on FIFO: {args.input_fifo}")
+    if args.mic:
+        print(f"Listening on microphone: device={args.device}, channels={args.channels}, sr={args.sr}")
+        chunk_iter = audio_chunks_from_mic(
+            sr=args.sr,
+            chunk_samples=chunk_samples,
+            device=args.device,
+            channels=args.channels,
+        )
+    else:
+        print(f"Listening on FIFO: {args.input_fifo}")
+        chunk_iter = audio_chunks_from_fifo(args.input_fifo, chunk_bytes)
+    
     print(f"Using label: {drone_label}")
 
     try:
-        with open(args.input_fifo, "rb") as f:
-            while True:
-                raw = f.read(chunk_bytes)
-                if not raw or len(raw) < chunk_bytes:
-                    continue
+        for chunk in chunk_iter:
+            n = len(chunk)
+            stream_time_s += n / args.sr
 
-                chunk = np.frombuffer(raw, dtype=np.float32)
-                n = len(chunk)
-                stream_time_s += n / args.sr
+            if n >= win_samples:
+                ring_buffer[:] = chunk[-win_samples:]
+                filled = win_samples
+            else:
+                ring_buffer[:-n] = ring_buffer[n:]
+                ring_buffer[-n:] = chunk
+                filled = min(win_samples, filled + n)
 
-                if n >= win_samples:
-                    ring_buffer[:] = chunk[-win_samples:]
-                    filled = win_samples
-                else:
-                    ring_buffer[:-n] = ring_buffer[n:]
-                    ring_buffer[-n:] = chunk
-                    filled = min(win_samples, filled + n)
+            since_last_infer += n
 
-                since_last_infer += n
+            if filled < win_samples or since_last_infer < hop_samples:
+                continue
 
-                if filled < win_samples or since_last_infer < hop_samples:
-                    continue
+            window = ring_buffer.copy().astype(np.float32)
+            window = window - np.mean(window)
+            window = rms_normalize(window, target_rms=args.target_rms)
 
-                window = ring_buffer.copy().astype(np.float32)
-                window = window - np.mean(window)
-                window = rms_normalize(window, target_rms=0.08)
+            since_last_infer = 0
 
-                since_last_infer = 0
+            raw_score = score_chunk(clf, window, args.sr, drone_label)
+            prev_raw_score = raw_score
 
-                raw_score = score_chunk(clf, window, args.sr, drone_label)
-                prev_raw_score = raw_score
+            recent_scores.append(raw_score)
 
-                recent_scores.append(raw_score)
+            # More responsive than percentile for short mixed events
+            smoothed_score = max(recent_scores) if recent_scores else raw_score
 
-                # More responsive than percentile for short mixed events
-                smoothed_score = max(recent_scores) if recent_scores else raw_score
+            decision = "drone" if smoothed_score >= args.threshold else "no_drone"
 
-                decision = "drone" if smoothed_score >= args.threshold else "no_drone"
+            event = {
+                "t_end": round(stream_time_s, 2),
+                "t_start": round(stream_time_s - args.win, 2),
+                "raw_score": raw_score,
+                "smoothed_score": smoothed_score,
+                "decision": decision,
+            }
 
-                event = {
-                    "t_end": round(stream_time_s, 2),
-                    "t_start": round(stream_time_s - args.win, 2),
-                    "raw_score": raw_score,
-                    "smoothed_score": smoothed_score,
-                    "decision": decision,
+            if out_file:
+                out_file.write(json.dumps(event) + "\n")
+                out_file.flush()
+
+            marker = "🚨" if decision == "drone" else "·"
+            changed = decision != prev_decision
+            change_tag = " CHANGE" if changed else ""
+
+            print(
+                f"{marker}{change_tag} "
+                f"window=({event['t_start']:.2f}s-{event['t_end']:.2f}s) "
+                f"raw={raw_score:.3f} smooth={smoothed_score:.3f} "
+                f"decision={decision}"
+            )
+
+            # Only post on transition into drone state
+            if decision == "drone" and prev_decision != "drone":
+                timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+                clip_path = os.path.join(args.clip_dir, f"drone_detected_{timestamp}.wav")
+                save_wav(clip_path, window, args.sr)
+
+                metadata = {
+                    "timestamp": datetime.now(timezone.utc).isoformat(),
+                    "gps": {
+                        "lat": gps_lat,
+                        "lon": gps_lon,
+                    },
+                    "event": "drone detected",
+                    "type": "fpv",
+                    "confidence": smoothed_score,
+                    "window": {
+                        "t_start": event["t_start"],
+                        "t_end": event["t_end"],
+                    },
                 }
 
-                if out_file:
-                    out_file.write(json.dumps(event) + "\n")
-                    out_file.flush()
+                try:
+                    response_json = post_detection(server_url, metadata, clip_path)
+                    print(f"POST OK: {response_json}")
+                except Exception as e:
+                    print(f"POST FAILED: {e}")
 
-                marker = "🚨" if decision == "drone" else "·"
-                changed = decision != prev_decision
-                change_tag = " CHANGE" if changed else ""
-
-                print(
-                    f"{marker}{change_tag} "
-                    f"window=({event['t_start']:.2f}s-{event['t_end']:.2f}s) "
-                    f"raw={raw_score:.3f} smooth={smoothed_score:.3f} "
-                    f"decision={decision}"
-                )
-                # Only post on transition into drone state
-                if decision == "drone" and prev_decision != "drone":
-                    timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
-                    clip_path = os.path.join(args.clip_dir, f"drone_detected_{timestamp}.wav")
-                    save_wav(clip_path, window, args.sr)
-
-                    metadata = {
-                        "timestamp": datetime.now(timezone.utc).isoformat(),
-                        "gps": {
-                            "lat": gps_lat,
-                            "lon": gps_lon,
-                        },
-                        "event": "drone detected",
-                        "type": "fpv",
-                        "confidence": smoothed_score,
-                        "window": {
-                            "t_start": event["t_start"],
-                            "t_end": event["t_end"],
-                        },
-                    }
-
-                    try:
-                        response_json = post_detection(server_url, metadata, clip_path)
-                        print(f"POST OK: {response_json}")
-                    except Exception as e:
-                        print(f"POST FAILED: {e}")
-
-                prev_decision = decision
-
+            prev_decision = decision
     finally:
         if out_file:
             out_file.close()
