@@ -175,7 +175,7 @@ def main():
     prev_decision = None
     prev_raw_score = 0.0
 
-    gps_lat, gps_lon = 0.0, 0.0  # Placeholder GPS coordinates
+    gps_lat, gps_lon = 44.436142, 26.102684  # Placeholder GPS coordinates
     server_url = "http://2doorspacemachine.local:8001/events"  # Placeholder server URL
     out_file = open(args.out, "a", encoding="utf-8") if args.out else None
 

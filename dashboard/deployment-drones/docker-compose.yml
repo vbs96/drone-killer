@@ -1,0 +1,46 @@
+services:
+  backend:
+    build:
+      context: ../backend
+      dockerfile: Dockerfile
+    container_name: drone-backend
+    ports:
+      - "8001:8001"
+    volumes:
+      - backend_uploads:/app/uploads
+    restart: unless-stopped
+    networks:
+      - drone-net
+
+  frontend:
+    build:
+      context: ../frontend
+      dockerfile: Dockerfile
+    container_name: drone-frontend
+    depends_on:
+      - backend
+      - tileserver
+    ports:
+      - "8080:80"
+    restart: unless-stopped
+    networks:
+      - drone-net
+
+  tileserver:
+    image: maptiler/tileserver-gl:latest
+    container_name: romania-tileserver
+    ports:
+      - "8081:8080"
+    volumes:
+      - ./romania-map:/data
+    restart: unless-stopped
+    networks:
+      - drone-net
+
+networks:
+  drone-net:
+    driver: bridge
+
+volumes:
+  backend_uploads:
+  geoserver_data:
