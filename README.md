@@ -1,14 +1,10 @@
 # drone-killer
 
-## Build C++
+## Build with C++
 
 ### Prereq
-- OpenCV
-- Tensorflow
+- Docker
 
-### Cmds
-- mkdir build && cd build
-- cmake -DTENSORFLOW_DIR=/path/to/libtensorflow ..
-- make
-- cd ..
-- ./build/demo
+### Run
+ - docker build -t drone-killer .
+ - 
