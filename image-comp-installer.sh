@@ -24,6 +24,3 @@ rm -rf /tmp/tf
 cd ~/drone-killer   # wherever you cloned the repo
 cmake -B build -DCMAKE_BUILD_TYPE=Release -DTFLITE_DIR=/usr/local
 cmake --build build
-
-# ── 4. Test it ────────────────────────────────────────────────────────
-./build/demo V_DRONE_024.mp4 output.mp4

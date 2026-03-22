@@ -195,14 +195,23 @@ static std::vector<Detection> postprocess(const float* raw_boxes,
 }
 
 // ── Main ─────────────────────────────────────────────────────────────
+// ── Helper: check if string is a non-negative integer ─────────────
+static bool is_camera_index(const std::string& s)
+{
+    return !s.empty() && std::all_of(s.begin(), s.end(), ::isdigit);
+}
+
 int main(int argc, char* argv[])
 {
     if (argc < 2) {
-        std::cerr << "Usage: " << argv[0] << " <video_path> [output_path]\n";
+        std::cerr << "Usage: " << argv[0] << " <video_path | camera_index | gst-pipeline> [output_path]\n"
+                  << "  camera_index : 0, 1, ...  (e.g. /dev/video0)\n"
+                  << "  gst-pipeline : e.g. 'libcamerasrc ! video/x-raw,width=640,height=480 ! videoconvert ! appsink'\n";
         return 1;
     }
-    const char* video_path  = argv[1];
-    const char* output_path = (argc >= 3) ? argv[2] : "output.mp4";
+    const std::string input_arg = argv[1];
+    const char* output_path = (argc >= 3) ? argv[2] : nullptr;
+    bool live_mode = is_camera_index(input_arg) || input_arg.find('!') != std::string::npos;
 
     // ── 1. Parse labels ──────────────────────────────────────────────
     auto category_index = parse_labelmap(PATH_TO_LABELS);
@@ -244,26 +253,42 @@ int main(int argc, char* argv[])
     int input_c = TfLiteTensorDim(input_tensor_info, 3);
     std::cout << "Model input: " << input_w << "x" << input_h << "x" << input_c << "\n";
 
-    // ── 4. Open video ────────────────────────────────────────────────
-    cv::VideoCapture cap(video_path);
+    // ── 4. Open video / camera ────────────────────────────────────────
+    cv::VideoCapture cap;
+    if (is_camera_index(input_arg)) {
+        int cam_idx = std::stoi(input_arg);
+        cap.open(cam_idx);
+    } else {
+        cap.open(input_arg);
+    }
     if (!cap.isOpened()) {
-        std::cerr << "Could not open video: " << video_path << "\n";
+        std::cerr << "Could not open input: " << input_arg << "\n";
         return 1;
     }
 
     int frame_w  = (int)cap.get(cv::CAP_PROP_FRAME_WIDTH);
     int frame_h  = (int)cap.get(cv::CAP_PROP_FRAME_HEIGHT);
     double fps   = cap.get(cv::CAP_PROP_FPS);
+    if (fps <= 0) fps = 30.0;  // default for cameras that don't report FPS
     int total    = (int)cap.get(cv::CAP_PROP_FRAME_COUNT);
-    std::cout << "Video: " << frame_w << "x" << frame_h
-              << " @ " << fps << " fps, " << total << " frames\n";
+    std::cout << (live_mode ? "Camera: " : "Video: ")
+              << frame_w << "x" << frame_h << " @ " << fps << " fps";
+    if (!live_mode) std::cout << ", " << total << " frames";
+    std::cout << "\n";
 
-    cv::VideoWriter writer(output_path,
-                           cv::VideoWriter::fourcc('m','p','4','v'),
-                           fps, cv::Size(frame_w, frame_h));
-    if (!writer.isOpened()) {
-        std::cerr << "Could not open output video for writing: " << output_path << "\n";
-        return 1;
+    cv::VideoWriter writer;
+    if (output_path) {
+        writer.open(output_path,
+                    cv::VideoWriter::fourcc('m','p','4','v'),
+                    fps, cv::Size(frame_w, frame_h));
+        if (!writer.isOpened()) {
+            std::cerr << "Could not open output video for writing: " << output_path << "\n";
+            return 1;
+        }
+    }
+
+    if (live_mode) {
+        std::cout << "Live mode — press 'q' to quit.\n";
     }
 
     // ── 5. Process frames ────────────────────────────────────────────
@@ -338,22 +363,30 @@ int main(int argc, char* argv[])
                         cv::FONT_HERSHEY_SIMPLEX, 0.8, cv::Scalar(0, 255, 0), 2);
         }
 
-        writer.write(frame_bgr);
+        if (writer.isOpened()) writer.write(frame_bgr);
 
-        std::printf("\rFrame %d/%d  |  %.1f ms  |  %d detection(s)",
-                    frame_no, total, elapsed_ms, count);
+        if (live_mode) {
+            cv::imshow("Drone Detection", frame_bgr);
+            if (cv::waitKey(1) == 'q') break;
+            std::printf("\rFrame %d  |  %.1f ms  |  %d detection(s)  ",
+                        frame_no, elapsed_ms, count);
+        } else {
+            std::printf("\rFrame %d/%d  |  %.1f ms  |  %d detection(s)",
+                        frame_no, total, elapsed_ms, count);
+        }
         std::fflush(stdout);
     }
 
     std::cout << "\n";
     cap.release();
-    writer.release();
+    if (writer.isOpened()) writer.release();
+    if (live_mode) cv::destroyAllWindows();
 
     if (frame_no > 0) {
         std::printf("Done. %d frames processed, avg %.1f ms/frame.\n",
                     frame_no, total_ms / frame_no);
     }
-    std::cout << "Saved " << output_path << "\n";
+    if (output_path) std::cout << "Saved " << output_path << "\n";
 
     // ── Cleanup ──────────────────────────────────────────────────────
     TfLiteInterpreterDelete(interpreter);
