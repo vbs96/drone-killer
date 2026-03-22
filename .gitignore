@@ -4,3 +4,7 @@ build/
 node_modules/
 package-lock.json
 *.mbtiles
+.idea/
+*.jpg
+.venv
+deploy/
