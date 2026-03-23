@@ -285,8 +285,10 @@ int main(int argc, char* argv[])
     if (!is_gst_pipeline) {
         frame_w = (int)cap.get(cv::CAP_PROP_FRAME_WIDTH);
         frame_h = (int)cap.get(cv::CAP_PROP_FRAME_HEIGHT);
-        fps = cap.get(cv::CAP_PROP_FPS);
-        if (fps <= 0) fps = 30.0;  // default for cameras that don't report FPS
+        if (!is_camera_index(input_arg)) {
+            fps = cap.get(cv::CAP_PROP_FPS);
+            if (fps <= 0) fps = 30.0;  // fallback for sources that don't report FPS
+        }
         total = (int)cap.get(cv::CAP_PROP_FRAME_COUNT);
     }
 
