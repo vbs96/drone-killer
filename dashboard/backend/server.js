@@ -22,7 +22,7 @@ app.use((req, res, next) => {
 const uploadDir = path.join(__dirname, "uploads");
 fs.mkdirSync(uploadDir, { recursive: true });
 
-// Serve saved audio files so marker popups can preview them in the frontend.
+// Serve saved uploads (audio or image snippets) for frontend previews.
 app.use("/uploads", express.static(uploadDir));
 
 const eventsStore = {
@@ -47,44 +47,56 @@ const storage = multer.diskStorage({
 
 const upload = multer({ storage });
 
-app.post("/events", upload.single("audio"), (req, res) => {
-  const metadataRaw = req.body.metadata;
+app.post(
+  "/events",
+  upload.fields([
+    { name: "audio", maxCount: 1 },
+    { name: "snippet", maxCount: 1 },
+  ]),
+  (req, res) => {
+    const metadataRaw = req.body.metadata;
 
-  if (!metadataRaw) {
-    return res.status(400).json({
-      ok: false,
-      error: "missing metadata field",
+    if (!metadataRaw) {
+      return res.status(400).json({
+        ok: false,
+        error: "missing metadata field",
+      });
+    }
+
+    let metadata;
+    try {
+      metadata = JSON.parse(metadataRaw);
+    } catch (err) {
+      return res.status(400).json({
+        ok: false,
+        error: "invalid metadata json",
+      });
+    }
+
+    const uploadedAudio = req.files?.audio?.[0] || null;
+    const uploadedSnippet = req.files?.snippet?.[0] || null;
+    const uploadedFile = uploadedSnippet || uploadedAudio;
+
+    const eventRecord = {
+      id: randomUUID(),
+      receivedAt: new Date().toISOString(),
+      metadata,
+      audioPath: uploadedAudio ? `/uploads/${uploadedAudio.filename}` : null,
+      snippetPath: uploadedSnippet ? `/uploads/${uploadedSnippet.filename}` : null,
+      uploadPath: uploadedFile ? `/uploads/${uploadedFile.filename}` : null,
+    };
+
+    eventsStore.byId[eventRecord.id] = eventRecord;
+    eventsStore.allIds.push(eventRecord.id);
+
+    console.log(JSON.stringify(eventRecord, null, 2));
+
+    return res.json({
+      ok: true,
+      message: "event received",
+      event: eventRecord,
     });
-  }
-
-  let metadata;
-  try {
-    metadata = JSON.parse(metadataRaw);
-  } catch (err) {
-    return res.status(400).json({
-      ok: false,
-      error: "invalid metadata json",
-    });
-  }
-
-  const eventRecord = {
-    id: randomUUID(),
-    receivedAt: new Date().toISOString(),
-    metadata,
-    audioPath: req.file ? `/uploads/${req.file.filename}` : null,
-  };
-
-  eventsStore.byId[eventRecord.id] = eventRecord;
-  eventsStore.allIds.push(eventRecord.id);
-
-  console.log(JSON.stringify(eventRecord, null, 2));
-
-  return res.json({
-    ok: true,
-    message: "event received",
-    event: eventRecord,
   });
-});
 
 app.get("/events", (_req, res) => {
   const events = getAllEvents();
