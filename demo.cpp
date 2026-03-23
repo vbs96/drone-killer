@@ -16,6 +16,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <fstream>
+#include <filesystem>
 #include <iostream>
 #include <map>
 #include <numeric>
@@ -34,6 +35,7 @@ static const float MIN_SCORE_THRESH    = 0.5f;
 static const float NMS_IOU_THRESH      = 0.6f;
 static const int   MAX_DETECTIONS      = 100;
 static const int   DETECTION_LOG_COOLDOWN_MS = 3000;
+static const char* DETECTION_FRAME_DIR = "detections";
 
 // Box encoding scales from pipeline.config
 static const float Y_SCALE = 10.0f;
@@ -309,6 +311,13 @@ int main(int argc, char* argv[])
     auto last_detection_log_time = std::chrono::steady_clock::now() -
                                    std::chrono::milliseconds(DETECTION_LOG_COOLDOWN_MS);
 
+    std::error_code fs_ec;
+    std::filesystem::create_directories(DETECTION_FRAME_DIR, fs_ec);
+    if (fs_ec) {
+        std::cerr << "Warning: could not create detection frame directory '"
+                  << DETECTION_FRAME_DIR << "': " << fs_ec.message() << "\n";
+    }
+
     while (cap.read(frame_bgr)) {
         ++frame_no;
 
@@ -367,6 +376,20 @@ int main(int argc, char* argv[])
                 std::printf("\n[DETECTED] frame=%d count=%d best_score=%.0f%%\n",
                             frame_no, count, best_score * 100.0f);
                 std::fflush(stdout);
+
+                char image_path[256];
+                std::snprintf(image_path, sizeof(image_path),
+                              "%s/frame_%06d_score_%03d.jpg",
+                              DETECTION_FRAME_DIR,
+                              frame_no,
+                              (int)(best_score * 100.0f));
+                if (cv::imwrite(image_path, frame_bgr)) {
+                    std::printf("[SAVED] %s\n", image_path);
+                } else {
+                    std::printf("[WARN] failed to save %s\n", image_path);
+                }
+                std::fflush(stdout);
+
                 last_detection_log_time = now;
             }
         } else if (was_detected_last_frame) {
