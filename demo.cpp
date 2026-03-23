@@ -258,7 +258,11 @@ int main(int argc, char* argv[])
     cv::VideoCapture cap;
     if (is_camera_index(input_arg)) {
         int cam_idx = std::stoi(input_arg);
-        cap.open(cam_idx);
+        // Prefer V4L2 for numeric camera devices to avoid OpenCV/GStreamer
+        // metadata query issues on some Raspberry Pi camera stacks.
+        if (!cap.open(cam_idx, cv::CAP_V4L2)) {
+            cap.open(cam_idx);
+        }
     } else if (is_gst_pipeline) {
         // On Raspberry Pi/libcamera setups, forcing the GStreamer backend is
         // more reliable than CAP_ANY for pipeline strings.
