@@ -211,8 +211,7 @@ int main(int argc, char* argv[])
     }
     const std::string input_arg = argv[1];
     const char* output_path = (argc >= 3) ? argv[2] : nullptr;
-    bool is_gst_pipeline = input_arg.find('!') != std::string::npos;
-    bool live_mode = is_camera_index(input_arg) || is_gst_pipeline;
+    bool live_mode = is_camera_index(input_arg) || input_arg.find('!') != std::string::npos;
 
     // ── 1. Parse labels ──────────────────────────────────────────────
     auto category_index = parse_labelmap(PATH_TO_LABELS);
@@ -257,56 +256,33 @@ int main(int argc, char* argv[])
     // ── 4. Open video / camera ────────────────────────────────────────
     cv::VideoCapture cap;
     if (is_camera_index(input_arg)) {
-        int cam_idx = std::stoi(input_arg);
-        // Prefer V4L2 for numeric camera devices to avoid OpenCV/GStreamer
-        // metadata query issues on some Raspberry Pi camera stacks.
-        if (!cap.open(cam_idx, cv::CAP_V4L2)) {
-            cap.open(cam_idx);
-        }
-    } else if (is_gst_pipeline) {
-        // On Raspberry Pi/libcamera setups, forcing the GStreamer backend is
-        // more reliable than CAP_ANY for pipeline strings.
+    int cam_idx = std::stoi(input_arg);
+    cap.open(cam_idx, cv::CAP_V4L2);
+    } else if (input_arg.find('!') != std::string::npos) {
         cap.open(input_arg, cv::CAP_GSTREAMER);
     } else {
         cap.open(input_arg);
     }
+
     if (!cap.isOpened()) {
         std::cerr << "Could not open input: " << input_arg << "\n";
         return 1;
     }
 
-    int frame_w = -1;
-    int frame_h = -1;
-    double fps = 30.0;
-    int total = -1;
-
-    // Some live GStreamer/libcamera sources do not expose metadata through
-    // CAP_PROP queries. Avoid querying those properties for gst pipelines.
-    if (!is_gst_pipeline) {
-        frame_w = (int)cap.get(cv::CAP_PROP_FRAME_WIDTH);
-        frame_h = (int)cap.get(cv::CAP_PROP_FRAME_HEIGHT);
-        if (!is_camera_index(input_arg)) {
-            fps = cap.get(cv::CAP_PROP_FPS);
-            if (fps <= 0) fps = 30.0;  // fallback for sources that don't report FPS
-        }
-        total = (int)cap.get(cv::CAP_PROP_FRAME_COUNT);
+    cv::Mat test_frame;
+    if (!cap.read(test_frame) || test_frame.empty()) {
+        std::cerr << "Opened input, but failed to grab a frame: " << input_arg << "\n";
+        return 1;
     }
 
-    cv::Mat prefetched_frame;
-    bool has_prefetched_frame = false;
-    if (frame_w <= 0 || frame_h <= 0) {
-        if (!cap.read(prefetched_frame) || prefetched_frame.empty()) {
-            std::cerr << "Could not read first frame from input: " << input_arg << "\n";
-            return 1;
-        }
-        frame_w = prefetched_frame.cols;
-        frame_h = prefetched_frame.rows;
-        has_prefetched_frame = true;
-    }
-
+    int frame_w  = (int)cap.get(cv::CAP_PROP_FRAME_WIDTH);
+    int frame_h  = (int)cap.get(cv::CAP_PROP_FRAME_HEIGHT);
+    double fps   = cap.get(cv::CAP_PROP_FPS);
+    if (fps <= 0) fps = 30.0;  // default for cameras that don't report FPS
+    int total    = (int)cap.get(cv::CAP_PROP_FRAME_COUNT);
     std::cout << (live_mode ? "Camera: " : "Video: ")
               << frame_w << "x" << frame_h << " @ " << fps << " fps";
-    if (!live_mode && total > 0) std::cout << ", " << total << " frames";
+    if (!live_mode) std::cout << ", " << total << " frames";
     std::cout << "\n";
 
     cv::VideoWriter writer;
@@ -329,14 +305,7 @@ int main(int argc, char* argv[])
     int frame_no = 0;
     double total_ms = 0.0;
 
-    while (true) {
-        if (has_prefetched_frame) {
-            frame_bgr = prefetched_frame;
-            has_prefetched_frame = false;
-        } else if (!cap.read(frame_bgr)) {
-            break;
-        }
-
+    while (cap.read(frame_bgr)) {
         ++frame_no;
 
         cv::cvtColor(frame_bgr, frame_rgb, cv::COLOR_BGR2RGB);
@@ -411,13 +380,8 @@ int main(int argc, char* argv[])
             std::printf("\rFrame %d  |  %.1f ms  |  %d detection(s)  ",
                         frame_no, elapsed_ms, count);
         } else {
-            if (total > 0) {
-                std::printf("\rFrame %d/%d  |  %.1f ms  |  %d detection(s)",
-                            frame_no, total, elapsed_ms, count);
-            } else {
-                std::printf("\rFrame %d  |  %.1f ms  |  %d detection(s)",
-                            frame_no, elapsed_ms, count);
-            }
+            std::printf("\rFrame %d/%d  |  %.1f ms  |  %d detection(s)",
+                        frame_no, total, elapsed_ms, count);
         }
         std::fflush(stdout);
     }
