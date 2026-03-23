@@ -33,6 +33,7 @@ static const char* PATH_TO_LABELS      = "model/object-detection.pbtxt";
 static const float MIN_SCORE_THRESH    = 0.5f;
 static const float NMS_IOU_THRESH      = 0.6f;
 static const int   MAX_DETECTIONS      = 100;
+static const int   DETECTION_LOG_COOLDOWN_MS = 3000;
 
 // Box encoding scales from pipeline.config
 static const float Y_SCALE = 10.0f;
@@ -304,6 +305,9 @@ int main(int argc, char* argv[])
     cv::Mat frame_bgr, frame_rgb, frame_resized;
     int frame_no = 0;
     double total_ms = 0.0;
+    bool was_detected_last_frame = false;
+    auto last_detection_log_time = std::chrono::steady_clock::now() -
+                                   std::chrono::milliseconds(DETECTION_LOG_COOLDOWN_MS);
 
     while (cap.read(frame_bgr)) {
         ++frame_no;
@@ -347,6 +351,29 @@ int main(int argc, char* argv[])
         int h = frame_bgr.rows;
         int w = frame_bgr.cols;
         int count = (int)detections.size();
+
+        float best_score = 0.0f;
+        for (const auto& det : detections) {
+            best_score = std::max(best_score, det.score);
+        }
+
+        bool detected_now = count > 0;
+        if (detected_now) {
+            auto now = std::chrono::steady_clock::now();
+            auto ms_since_last = std::chrono::duration_cast<std::chrono::milliseconds>(
+                                    now - last_detection_log_time)
+                                    .count();
+            if (!was_detected_last_frame || ms_since_last >= DETECTION_LOG_COOLDOWN_MS) {
+                std::printf("\n[DETECTED] frame=%d count=%d best_score=%.0f%%\n",
+                            frame_no, count, best_score * 100.0f);
+                std::fflush(stdout);
+                last_detection_log_time = now;
+            }
+        } else if (was_detected_last_frame) {
+            std::printf("\n[CLEAR] frame=%d no drone detected\n", frame_no);
+            std::fflush(stdout);
+        }
+        was_detected_last_frame = detected_now;
 
         for (auto& det : detections) {
             int left   = (int)(det.xmin * w);
