@@ -103,6 +103,18 @@ export class App implements AfterViewInit, OnDestroy {
     root.appendChild(time);
 
     const audioUrl = this.eventsService.toAbsoluteBackendUrl(eventRecord.audioPath);
+    const snippetPath = eventRecord.snippetPath ?? eventRecord.uploadPath;
+    const snippetUrl = this.eventsService.toAbsoluteBackendUrl(snippetPath);
+
+    if (snippetUrl) {
+      const snippetImage = document.createElement('img');
+      snippetImage.src = snippetUrl;
+      snippetImage.alt = 'Detected drone snippet';
+      snippetImage.loading = 'lazy';
+      snippetImage.className = 'event-popup-image';
+      root.appendChild(snippetImage);
+    }
+
     if (audioUrl) {
       const audio = document.createElement('audio');
       audio.controls = true;
@@ -110,11 +122,13 @@ export class App implements AfterViewInit, OnDestroy {
       audio.src = audioUrl;
       audio.className = 'event-popup-audio';
       root.appendChild(audio);
-    } else {
-      const noAudio = document.createElement('div');
-      noAudio.textContent = 'No audio uploaded for this event.';
-      noAudio.className = 'event-popup-noaudio';
-      root.appendChild(noAudio);
+    }
+
+    if (!audioUrl && !snippetUrl) {
+      const noMedia = document.createElement('div');
+      noMedia.textContent = 'No media uploaded for this event.';
+      noMedia.className = 'event-popup-noaudio';
+      root.appendChild(noMedia);
     }
 
     return root;

@@ -28,7 +28,8 @@ Drone detection system using an SSD MobileNet v1 model converted to TensorFlow L
 sudo apt update
 sudo apt install -y cmake g++ git wget unzip pkg-config \
     libopencv-dev \
-    libavcodec-dev libavformat-dev libswscale-dev
+    libavcodec-dev libavformat-dev libswscale-dev \
+    libcurl4-openssl-dev
 ```
 
 ### Build TFLite C library (same as image-comp-installer.sh)

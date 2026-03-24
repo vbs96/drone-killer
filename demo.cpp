@@ -41,6 +41,8 @@ static const int   MAX_DETECTIONS      = 100;
 static const int   DETECTION_LOG_COOLDOWN_MS = 3000;
 static const char* DETECTION_FRAME_DIR = "detections";
 static const char* DEFAULT_EVENTS_SERVER_URL = "";
+static const double GPS_BUCHAREST_LAT = 44.436142;
+static const double GPS_BUCHAREST_LON = 26.102684;
 
 // Box encoding scales from pipeline.config
 static const float Y_SCALE = 10.0f;
@@ -264,6 +266,10 @@ static bool post_detection_file(const std::string& server_url,
     const std::string metadata =
         "{"
         "\"timestamp\":\"" + iso8601_utc_now() + "\"," 
+        "\"gps\":{"
+        "\"lat\":" + std::to_string(GPS_BUCHAREST_LAT) + ","
+        "\"lon\":" + std::to_string(GPS_BUCHAREST_LON) +
+        "},"
         "\"event\":\"drone detected\"," 
         "\"type\":\"video\"," 
         "\"confidence\":" + std::to_string(best_score) + ","

@@ -7,6 +7,8 @@ export interface BackendEvent {
   receivedAt: string;
   metadata: any;
   audioPath: string | null;
+  snippetPath: string | null;
+  uploadPath: string | null;
 }
 
 interface EventsResponse {

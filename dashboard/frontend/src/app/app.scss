@@ -33,3 +33,33 @@
 	height: 100%;
 	min-height: 0;
 }
+
+:host ::ng-deep .event-popup {
+	display: grid;
+	gap: 0.5rem;
+	min-width: 220px;
+	max-width: 280px;
+}
+
+:host ::ng-deep .event-popup-time {
+	font-size: 0.75rem;
+	color: #46576f;
+}
+
+:host ::ng-deep .event-popup-image {
+	width: 100%;
+	height: auto;
+	max-height: 180px;
+	object-fit: cover;
+	border-radius: 0.4rem;
+	border: 1px solid #d7e0ea;
+}
+
+:host ::ng-deep .event-popup-audio {
+	width: 100%;
+}
+
+:host ::ng-deep .event-popup-noaudio {
+	font-size: 0.8rem;
+	color: #586b84;
+}
