@@ -5,7 +5,7 @@ Drone detection system using an SSD MobileNet v1 model converted to TensorFlow L
 ## Usage
 
 ```
-./demo <input> [output_path]
+./demo <input> [output_path] [--server-url URL]
 ```
 
 | Input type | Argument example | Description |
@@ -13,10 +13,12 @@ Drone detection system using an SSD MobileNet v1 model converted to TensorFlow L
 | Video file | `./demo video.mp4 output.mp4` | Process a video file and save annotated output |
 | Camera index | `./demo 0` | Open `/dev/video0` (V4L2 / USB camera) |
 | Camera + record | `./demo 0 output.mp4` | Live camera with recording to file |
+| Camera + event upload | `./demo 0 --server-url http://localhost:8001/events` | Save/POST detection snippets to backend events API |
 | GStreamer pipeline | `./demo "libcamerasrc ! video/x-raw,width=640,height=480,framerate=30/1 ! videoconvert ! appsink"` | Pi libcamera stack (Bullseye+) |
 
 - **Video file mode:** processes all frames, writes output, and exits.
 - **Live camera mode:** displays a window with detections in real-time. Press `q` to quit. Output file is optional.
+- **Event upload mode:** when `--server-url` is set, each throttled detection snapshot is uploaded as multipart form data with `metadata` and file field `snippet`.
 
 ## Build (native, on ARM64 Debian 12 or 13 VM)
 
@@ -26,7 +28,8 @@ Drone detection system using an SSD MobileNet v1 model converted to TensorFlow L
 sudo apt update
 sudo apt install -y cmake g++ git wget unzip pkg-config \
     libopencv-dev \
-    libavcodec-dev libavformat-dev libswscale-dev
+    libavcodec-dev libavformat-dev libswscale-dev \
+    libcurl4-openssl-dev
 ```
 
 ### Build TFLite C library (same as image-comp-installer.sh)

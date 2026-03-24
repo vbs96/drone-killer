@@ -16,15 +16,20 @@
 #include <cstdlib>
 #include <cstring>
 #include <fstream>
+#include <filesystem>
 #include <iostream>
 #include <map>
 #include <numeric>
 #include <regex>
 #include <string>
+#include <ctime>
 #include <vector>
 
 #include <opencv2/opencv.hpp>
 #include <tensorflow/lite/c/c_api.h>
+#ifdef DRONE_DEMO_HAS_CURL
+#include <curl/curl.h>
+#endif
 
 // ── Configuration ────────────────────────────────────────────────────
 static const char* PATH_TO_MODEL       = "model/drone_detect.tflite";
@@ -33,6 +38,11 @@ static const char* PATH_TO_LABELS      = "model/object-detection.pbtxt";
 static const float MIN_SCORE_THRESH    = 0.5f;
 static const float NMS_IOU_THRESH      = 0.6f;
 static const int   MAX_DETECTIONS      = 100;
+static const int   DETECTION_LOG_COOLDOWN_MS = 3000;
+static const char* DETECTION_FRAME_DIR = "detections";
+static const char* DEFAULT_EVENTS_SERVER_URL = "";
+static const double GPS_BUCHAREST_LAT = 44.436142;
+static const double GPS_BUCHAREST_LON = 26.102684;
 
 // Box encoding scales from pipeline.config
 static const float Y_SCALE = 10.0f;
@@ -201,17 +211,159 @@ static bool is_camera_index(const std::string& s)
     return !s.empty() && std::all_of(s.begin(), s.end(), ::isdigit);
 }
 
+static std::string json_escape(const std::string& in)
+{
+    std::string out;
+    out.reserve(in.size());
+    for (char c : in) {
+        switch (c) {
+            case '"': out += "\\\""; break;
+            case '\\': out += "\\\\"; break;
+            case '\n': out += "\\n"; break;
+            case '\r': out += "\\r"; break;
+            case '\t': out += "\\t"; break;
+            default: out.push_back(c); break;
+        }
+    }
+    return out;
+}
+
+static std::string iso8601_utc_now()
+{
+    std::time_t now = std::time(nullptr);
+    std::tm tm_utc{};
+#ifdef _WIN32
+    gmtime_s(&tm_utc, &now);
+#else
+    gmtime_r(&now, &tm_utc);
+#endif
+    char buf[32];
+    std::strftime(buf, sizeof(buf), "%Y-%m-%dT%H:%M:%SZ", &tm_utc);
+    return std::string(buf);
+}
+
+#ifdef DRONE_DEMO_HAS_CURL
+static size_t curl_write_cb(char* ptr, size_t size, size_t nmemb, void* userdata)
+{
+    const size_t total = size * nmemb;
+    auto* out = static_cast<std::string*>(userdata);
+    out->append(ptr, total);
+    return total;
+}
+
+static bool post_detection_file(const std::string& server_url,
+                                const std::string& file_path,
+                                int frame_no,
+                                int count,
+                                float best_score,
+                                std::string& response)
+{
+    response.clear();
+    CURL* curl = curl_easy_init();
+    if (!curl) return false;
+
+    // Keep metadata aligned with backend events and audio uploader shape.
+    const std::string metadata =
+        "{"
+        "\"timestamp\":\"" + iso8601_utc_now() + "\"," 
+        "\"gps\":{"
+        "\"lat\":" + std::to_string(GPS_BUCHAREST_LAT) + ","
+        "\"lon\":" + std::to_string(GPS_BUCHAREST_LON) +
+        "},"
+        "\"event\":\"drone detected\"," 
+        "\"type\":\"video\"," 
+        "\"confidence\":" + std::to_string(best_score) + ","
+        "\"frame\":" + std::to_string(frame_no) + ","
+        "\"detections\":" + std::to_string(count) + ","
+        "\"snippet\":\"" + json_escape(file_path) + "\""
+        "}";
+
+    curl_mime* mime = curl_mime_init(curl);
+    if (!mime) {
+        curl_easy_cleanup(curl);
+        return false;
+    }
+
+    curl_mimepart* part = curl_mime_addpart(mime);
+    curl_mime_name(part, "metadata");
+    curl_mime_data(part, metadata.c_str(), CURL_ZERO_TERMINATED);
+
+    part = curl_mime_addpart(mime);
+    // Backend accepts both "audio" and "snippet" fields.
+    curl_mime_name(part, "snippet");
+    curl_mime_filedata(part, file_path.c_str());
+    curl_mime_type(part, "image/jpeg");
+
+    curl_easy_setopt(curl, CURLOPT_URL, server_url.c_str());
+    curl_easy_setopt(curl, CURLOPT_MIMEPOST, mime);
+    curl_easy_setopt(curl, CURLOPT_TIMEOUT, 10L);
+    curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, curl_write_cb);
+    curl_easy_setopt(curl, CURLOPT_WRITEDATA, &response);
+
+    const CURLcode rc = curl_easy_perform(curl);
+    long http_code = 0;
+    if (rc == CURLE_OK) {
+        curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &http_code);
+    }
+
+    curl_mime_free(mime);
+    curl_easy_cleanup(curl);
+
+    return rc == CURLE_OK && http_code >= 200 && http_code < 300;
+}
+#endif
+
 int main(int argc, char* argv[])
 {
     if (argc < 2) {
-        std::cerr << "Usage: " << argv[0] << " <video_path | camera_index | gst-pipeline> [output_path]\n"
+        std::cerr << "Usage: " << argv[0] << " <video_path | camera_index | gst-pipeline> [output_path] [--server-url URL]\n"
                   << "  camera_index : 0, 1, ...  (e.g. /dev/video0)\n"
-                  << "  gst-pipeline : e.g. 'libcamerasrc ! video/x-raw,width=640,height=480 ! videoconvert ! appsink'\n";
+                  << "  gst-pipeline : e.g. 'libcamerasrc ! video/x-raw,width=640,height=480 ! videoconvert ! appsink'\n"
+                  << "  --server-url : POST detection snippets to backend /events\n";
         return 1;
     }
     const std::string input_arg = argv[1];
-    const char* output_path = (argc >= 3) ? argv[2] : nullptr;
+
+    std::string output_path_arg;
+    std::string server_url = DEFAULT_EVENTS_SERVER_URL;
+    for (int i = 2; i < argc; ++i) {
+        const std::string arg = argv[i];
+        if (arg == "--server-url") {
+            if (i + 1 >= argc) {
+                std::cerr << "Missing URL after --server-url\n";
+                return 1;
+            }
+            server_url = argv[++i];
+            continue;
+        }
+        if (output_path_arg.empty()) {
+            output_path_arg = arg;
+            continue;
+        }
+        std::cerr << "Unknown argument: " << arg << "\n";
+        return 1;
+    }
+
+    const char* output_path = output_path_arg.empty() ? nullptr : output_path_arg.c_str();
     bool live_mode = is_camera_index(input_arg) || input_arg.find('!') != std::string::npos;
+
+#ifdef DRONE_DEMO_HAS_CURL
+    bool upload_enabled = !server_url.empty();
+    bool curl_ready = false;
+    if (upload_enabled) {
+        if (curl_global_init(CURL_GLOBAL_DEFAULT) == CURLE_OK) {
+            curl_ready = true;
+            std::cout << "Event upload enabled: " << server_url << "\n";
+        } else {
+            std::cerr << "Warning: failed to initialize curl; uploads disabled\n";
+            upload_enabled = false;
+        }
+    }
+#else
+    if (!server_url.empty()) {
+        std::cerr << "Warning: --server-url ignored (built without libcurl support)\n";
+    }
+#endif
 
     // ── 1. Parse labels ──────────────────────────────────────────────
     auto category_index = parse_labelmap(PATH_TO_LABELS);
@@ -256,13 +408,22 @@ int main(int argc, char* argv[])
     // ── 4. Open video / camera ────────────────────────────────────────
     cv::VideoCapture cap;
     if (is_camera_index(input_arg)) {
-        int cam_idx = std::stoi(input_arg);
-        cap.open(cam_idx);
+    int cam_idx = std::stoi(input_arg);
+    cap.open(cam_idx, cv::CAP_V4L2);
+    } else if (input_arg.find('!') != std::string::npos) {
+        cap.open(input_arg, cv::CAP_GSTREAMER);
     } else {
         cap.open(input_arg);
     }
+
     if (!cap.isOpened()) {
         std::cerr << "Could not open input: " << input_arg << "\n";
+        return 1;
+    }
+
+    cv::Mat test_frame;
+    if (!cap.read(test_frame) || test_frame.empty()) {
+        std::cerr << "Opened input, but failed to grab a frame: " << input_arg << "\n";
         return 1;
     }
 
@@ -295,6 +456,16 @@ int main(int argc, char* argv[])
     cv::Mat frame_bgr, frame_rgb, frame_resized;
     int frame_no = 0;
     double total_ms = 0.0;
+    bool was_detected_last_frame = false;
+    auto last_detection_log_time = std::chrono::steady_clock::now() -
+                                   std::chrono::milliseconds(DETECTION_LOG_COOLDOWN_MS);
+
+    std::error_code fs_ec;
+    std::filesystem::create_directories(DETECTION_FRAME_DIR, fs_ec);
+    if (fs_ec) {
+        std::cerr << "Warning: could not create detection frame directory '"
+                  << DETECTION_FRAME_DIR << "': " << fs_ec.message() << "\n";
+    }
 
     while (cap.read(frame_bgr)) {
         ++frame_no;
@@ -338,6 +509,58 @@ int main(int argc, char* argv[])
         int h = frame_bgr.rows;
         int w = frame_bgr.cols;
         int count = (int)detections.size();
+
+        float best_score = 0.0f;
+        for (const auto& det : detections) {
+            best_score = std::max(best_score, det.score);
+        }
+
+        bool detected_now = count > 0;
+        if (detected_now) {
+            auto now = std::chrono::steady_clock::now();
+            auto ms_since_last = std::chrono::duration_cast<std::chrono::milliseconds>(
+                                    now - last_detection_log_time)
+                                    .count();
+            if (!was_detected_last_frame || ms_since_last >= DETECTION_LOG_COOLDOWN_MS) {
+                std::printf("\n[DETECTED] frame=%d count=%d best_score=%.0f%%\n",
+                            frame_no, count, best_score * 100.0f);
+                std::fflush(stdout);
+
+                char image_path[256];
+                std::snprintf(image_path, sizeof(image_path),
+                              "%s/frame_%06d_score_%03d.jpg",
+                              DETECTION_FRAME_DIR,
+                              frame_no,
+                              (int)(best_score * 100.0f));
+                if (cv::imwrite(image_path, frame_bgr)) {
+                    std::printf("[SAVED] %s\n", image_path);
+#ifdef DRONE_DEMO_HAS_CURL
+                    if (upload_enabled) {
+                        std::string response;
+                        if (post_detection_file(server_url, image_path, frame_no, count, best_score, response)) {
+                            std::printf("[POST OK] %s\n", server_url.c_str());
+                        } else {
+                            std::printf("[POST FAILED] %s", server_url.c_str());
+                            if (!response.empty()) {
+                                std::printf(" response=%s", response.c_str());
+                            }
+                            std::printf("\n");
+                        }
+                        std::fflush(stdout);
+                    }
+#endif
+                } else {
+                    std::printf("[WARN] failed to save %s\n", image_path);
+                }
+                std::fflush(stdout);
+
+                last_detection_log_time = now;
+            }
+        } else if (was_detected_last_frame) {
+            std::printf("\n[CLEAR] frame=%d no drone detected\n", frame_no);
+            std::fflush(stdout);
+        }
+        was_detected_last_frame = detected_now;
 
         for (auto& det : detections) {
             int left   = (int)(det.xmin * w);
@@ -387,6 +610,12 @@ int main(int argc, char* argv[])
                     frame_no, total_ms / frame_no);
     }
     if (output_path) std::cout << "Saved " << output_path << "\n";
+
+#ifdef DRONE_DEMO_HAS_CURL
+    if (curl_ready) {
+        curl_global_cleanup();
+    }
+#endif
 
     // ── Cleanup ──────────────────────────────────────────────────────
     TfLiteInterpreterDelete(interpreter);

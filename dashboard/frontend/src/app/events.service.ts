@@ -7,6 +7,8 @@ export interface BackendEvent {
   receivedAt: string;
   metadata: any;
   audioPath: string | null;
+  snippetPath: string | null;
+  uploadPath: string | null;
 }
 
 interface EventsResponse {
@@ -22,14 +24,23 @@ export class EventsService {
 
   constructor(private readonly http: HttpClient) {}
 
-  getEvents(): Observable<BackendEvent[]> {
-    return this.http.get<EventsResponse>(this.eventsUrl).pipe(
+  getEvents(lastMinutes: number | null = null): Observable<BackendEvent[]> {
+    const params =
+      lastMinutes === null
+        ? undefined
+        : {
+            lastMinutes: String(lastMinutes),
+          };
+
+    return this.http.get<EventsResponse>(this.eventsUrl, { params }).pipe(
       map((response) => (Array.isArray(response.events) ? response.events : []))
     );
   }
 
-  pollEvents(intervalMs = 3000): Observable<BackendEvent[]> {
-    return timer(0, intervalMs).pipe(switchMap(() => this.getEvents()));
+  pollEvents(intervalMs = 3000, lastMinutesProvider?: () => number | null): Observable<BackendEvent[]> {
+    return timer(0, intervalMs).pipe(
+      switchMap(() => this.getEvents(lastMinutesProvider ? lastMinutesProvider() : null))
+    );
   }
 
   toAbsoluteBackendUrl(urlPath: string | null): string | null {

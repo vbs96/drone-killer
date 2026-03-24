@@ -1,0 +1,128 @@
+.events-drawer {
+  height: 100%;
+  min-height: 0;
+  background: linear-gradient(180deg, #10263f 0%, #0f1f33 100%);
+  color: #e7f0fa;
+  border-right: 1px solid #2a4360;
+  display: grid;
+  grid-template-rows: auto 1fr;
+}
+
+.events-drawer-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  padding: 0.8rem 0.9rem;
+  border-bottom: 1px solid #304d6d;
+  background: rgba(8, 17, 29, 0.32);
+}
+
+.events-drawer-header h2 {
+  margin: 0;
+  font-size: 0.95rem;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+}
+
+.events-drawer-header span {
+  font-size: 0.78rem;
+  color: #b8cae0;
+}
+
+.events-list {
+  overflow: auto;
+  padding: 0.7rem;
+  display: grid;
+  gap: 0.7rem;
+}
+
+.events-empty {
+  margin: 0;
+  padding: 0.8rem;
+  font-size: 0.82rem;
+  border-radius: 0.55rem;
+  border: 1px dashed #46668c;
+  color: #c5d8f0;
+}
+
+.event-card {
+  display: grid;
+  gap: 0.45rem;
+  padding: 0.68rem;
+  border: 1px solid #395370;
+  border-radius: 0.62rem;
+  background: linear-gradient(180deg, rgba(13, 25, 40, 0.85) 0%, rgba(12, 22, 35, 0.94) 100%);
+}
+
+.event-card-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.65rem;
+}
+
+.event-id {
+  font-size: 0.8rem;
+  letter-spacing: 0.04em;
+}
+
+.event-type {
+  font-size: 0.69rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  padding: 0.18rem 0.44rem;
+  border-radius: 999px;
+}
+
+.event-type-audio {
+  background: rgba(243, 212, 48, 0.2);
+  color: #f3d430;
+  border: 1px solid rgba(243, 212, 48, 0.48);
+}
+
+.event-type-video,
+.event-type-fpv {
+  background: rgba(218, 11, 11, 0.2);
+  color: #ff9c9c;
+  border: 1px solid rgba(218, 11, 11, 0.5);
+}
+
+.event-time {
+  font-size: 0.74rem;
+  color: #9fb8d3;
+}
+
+.event-location {
+  font-size: 0.72rem;
+  color: #82c7ff;
+}
+
+.event-snippet-link {
+  display: block;
+}
+
+.event-snippet-link img {
+  width: 100%;
+  max-height: 160px;
+  object-fit: cover;
+  border-radius: 0.45rem;
+  border: 1px solid #446385;
+}
+
+.event-no-snippet {
+  font-size: 0.78rem;
+  color: #afc1d7;
+}
+
+audio {
+  width: 100%;
+}
+
+@media (max-width: 900px) {
+  .events-drawer {
+    border-right: none;
+    border-bottom: 1px solid #2a4360;
+    max-height: 45dvh;
+  }
+}

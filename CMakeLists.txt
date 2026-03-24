@@ -7,6 +7,9 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 # ── Find OpenCV ──────────────────────────────────────────────────────
 find_package(OpenCV REQUIRED)
 
+# ── Optional: event upload support via libcurl ──────────────────────
+find_package(CURL)
+
 # ── Find TensorFlow Lite C library ───────────────────────────────────
 # Set TFLITE_DIR to the root of the TFLite install prefix,
 # or install it system-wide so that the headers/libs are on default paths.
@@ -37,3 +40,10 @@ target_link_libraries(demo PRIVATE
     ${OpenCV_LIBS}
     tensorflowlite_c
 )
+
+if(CURL_FOUND)
+    target_link_libraries(demo PRIVATE CURL::libcurl)
+    target_compile_definitions(demo PRIVATE DRONE_DEMO_HAS_CURL=1)
+else()
+    message(WARNING "libcurl not found: --server-url upload support will be disabled")
+endif()

@@ -10,10 +10,29 @@
 	background: linear-gradient(180deg, #0d1726 0%, #12253a 100%);
 }
 
+.content {
+	min-height: 0;
+	display: grid;
+	grid-template-columns: minmax(290px, 340px) 1fr;
+}
+
+.drawer {
+	min-height: 0;
+}
+
 .topbar {
 	padding: 0.75rem 1rem;
+	background-color: #0f2238;
 	color: #e6f0ff;
 	border-bottom: 1px solid #2c3f56;
+}
+
+.topbar-row {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 0.75rem;
+	flex-wrap: wrap;
 }
 
 .topbar h1 {
@@ -28,8 +47,109 @@
 	color: #b5c5db;
 }
 
+.minutes-filter {
+	display: inline-flex;
+	align-items: center;
+	gap: 0.4rem;
+	font-size: 0.78rem;
+	font-weight: 600;
+	color: #dbe7fa;
+}
+
+.minutes-filter select {
+	appearance: none;
+	padding: 0.3rem 2rem 0.3rem 0.6rem;
+	border: 1px solid #3a526f;
+	border-radius: 0.45rem;
+	background: linear-gradient(180deg, #1d334c 0%, #172a41 100%);
+	color: #e6f0ff;
+	font-size: 0.78rem;
+	font-weight: 600;
+	cursor: pointer;
+}
+
+.minutes-filter select option {
+	background-color: #ffffff;
+	color: #1b2b3c;
+}
+
+.minutes-filter select:focus-visible {
+	outline: 2px solid #5cb9ff;
+	outline-offset: 2px;
+}
+
 .map {
 	width: 100%;
 	height: 100%;
 	min-height: 0;
+}
+
+@media (max-width: 900px) {
+	.content {
+		grid-template-columns: 1fr;
+		grid-template-rows: auto 1fr;
+	}
+}
+
+:host ::ng-deep .event-popup {
+	display: grid;
+	gap: 0.5rem;
+	min-width: 220px;
+	max-width: 320px;
+}
+
+:host ::ng-deep .event-popup-section {
+	display: grid;
+	gap: 0.45rem;
+	padding-top: 0.25rem;
+	border-top: 1px solid #e4ebf3;
+}
+
+:host ::ng-deep .event-popup-section-title {
+	font-size: 0.78rem;
+	font-weight: 700;
+	color: #24364b;
+}
+
+:host ::ng-deep .event-popup-time {
+	font-size: 0.75rem;
+	color: #46576f;
+}
+
+:host ::ng-deep .event-popup-image {
+	width: 100%;
+	height: auto;
+	max-height: 180px;
+	object-fit: cover;
+	border-radius: 0.4rem;
+	border: 1px solid #d7e0ea;
+}
+
+:host ::ng-deep .event-popup-audio {
+	width: 100%;
+}
+
+:host ::ng-deep .event-popup-noaudio {
+	font-size: 0.8rem;
+	color: #586b84;
+}
+
+:host ::ng-deep .event-marker {
+	width: 20px;
+	height: 20px;
+	border-radius: 50%;
+	border: 2px solid rgba(255, 255, 255, 0.95);
+	box-shadow: 0 2px 8px rgba(3, 12, 22, 0.45);
+}
+
+:host ::ng-deep .event-marker-audio {
+	background: #f3d430;
+}
+
+:host ::ng-deep .event-marker-video {
+	background: #da0b0b;
+}
+
+:host ::ng-deep .event-marker-mixed {
+	background: linear-gradient(90deg, #f3d430 0 50%, #da0b0b 50% 100%);
 }
