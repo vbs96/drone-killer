@@ -34,6 +34,20 @@ function getAllEvents() {
   return eventsStore.allIds.map((id) => eventsStore.byId[id]);
 }
 
+function getEventTimestampMs(eventRecord) {
+  const receivedAtMs = Date.parse(eventRecord.receivedAt);
+  if (!Number.isNaN(receivedAtMs)) {
+    return receivedAtMs;
+  }
+
+  const metadataTimestampMs = Date.parse(eventRecord?.metadata?.timestamp);
+  if (!Number.isNaN(metadataTimestampMs)) {
+    return metadataTimestampMs;
+  }
+
+  return null;
+}
+
 const storage = multer.diskStorage({
   destination: function (_req, _file, cb) {
     cb(null, uploadDir);
@@ -98,12 +112,36 @@ app.post(
     });
   });
 
-app.get("/events", (_req, res) => {
-  const events = getAllEvents();
+app.get("/events", (req, res) => {
+  const lastMinutesRaw = req.query.lastMinutes;
+  const allEvents = getAllEvents();
+
+  if (lastMinutesRaw === undefined) {
+    return res.json({
+      ok: true,
+      count: allEvents.length,
+      events: allEvents,
+    });
+  }
+
+  const lastMinutes = Number(lastMinutesRaw);
+  if (!Number.isFinite(lastMinutes) || lastMinutes < 0) {
+    return res.status(400).json({
+      ok: false,
+      error: "lastMinutes must be a non-negative number",
+    });
+  }
+
+  const cutoffMs = Date.now() - lastMinutes * 60 * 1000;
+  const filteredEvents = allEvents.filter((eventRecord) => {
+    const eventMs = getEventTimestampMs(eventRecord);
+    return eventMs !== null && eventMs >= cutoffMs;
+  });
+
   return res.json({
     ok: true,
-    count: events.length,
-    events,
+    count: filteredEvents.length,
+    events: filteredEvents,
   });
 });
 

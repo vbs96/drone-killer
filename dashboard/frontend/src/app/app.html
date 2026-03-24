@@ -1,8 +1,24 @@
 <div class="layout">
   <header class="topbar">
-    <h1>Drone Dashboard Map</h1>
+    <div class="topbar-row">
+      <h1>Drone Dashboard Map</h1>
+      <label class="minutes-filter" for="minutesFilter">
+        Last
+        <select
+          id="minutesFilter"
+          [value]="selectedLastMinutes"
+          (change)="onLastMinutesChange(minutesFilter.value)"
+          #minutesFilter
+          aria-label="Filter events by last minutes"
+        >
+          @for (minutes of lastMinutesOptions; track minutes) {
+            <option [value]="minutes">{{ minutes }} min</option>
+          }
+        </select>
+      </label>
+    </div>
     <p>Tiles: {{ tileStyleUrl }}</p>
-    <p>Events API: {{ eventsUrl }}</p>
+    <p>Events API: {{ eventsUrl }}?lastMinutes={{ selectedLastMinutes }}</p>
     <p>Loaded events: {{ eventCount }}</p>
   </header>
   <div #mapContainer class="map" aria-label="Romania map"></div>
