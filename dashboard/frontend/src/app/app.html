@@ -21,5 +21,8 @@
     <p>Events API: {{ eventsUrl }}?lastMinutes={{ selectedLastMinutes }}</p>
     <p>Loaded events: {{ eventCount }}</p>
   </header>
-  <div #mapContainer class="map" aria-label="Romania map"></div>
+  <div class="content">
+    <app-events-drawer class="drawer" [events]="events"></app-events-drawer>
+    <div #mapContainer class="map" aria-label="Romania map"></div>
+  </div>
 </div>

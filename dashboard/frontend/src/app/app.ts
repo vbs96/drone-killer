@@ -1,9 +1,10 @@
-import { AfterViewInit, Component, ElementRef, OnDestroy, ViewChild } from '@angular/core';
+import { AfterViewInit, ChangeDetectorRef, Component, ElementRef, OnDestroy, ViewChild } from '@angular/core';
 import maplibregl, { Map as MapLibreMap, Marker } from 'maplibre-gl';
-import { Subscription } from 'rxjs';
+import { map, merge, Subject, Subscription, switchMap, timer } from 'rxjs';
 import { BackendEvent, EventsService } from './events.service';
+import { EventsDrawerComponent } from './events-drawer.component';
 
-type EventType = 'audio' | 'video';
+type EventType = 'audio' | 'video' | 'fpv';
 
 interface EventsAtLocation {
   key: string;
@@ -14,6 +15,8 @@ interface EventsAtLocation {
 
 @Component({
   selector: 'app-root',
+  standalone: true,
+  imports: [EventsDrawerComponent],
   templateUrl: './app.html',
   styleUrl: './app.scss',
 })
@@ -26,12 +29,19 @@ export class App implements AfterViewInit, OnDestroy {
   readonly lastMinutesOptions = [5, 10, 15, 30, 60];
   selectedLastMinutes = 15;
   eventCount = 0;
+  events: BackendEvent[] = [];
 
   private readonly markersByLocationKey = new Map<string, Marker>();
+  private readonly markerSignatureByLocationKey = new Map<string, string>();
+  private groupedEventsByLocation = new Map<string, EventsAtLocation>();
+  private readonly refreshTrigger$ = new Subject<void>();
   private map: MapLibreMap | undefined;
   private eventsSubscription: Subscription | undefined;
 
-  constructor(private readonly eventsService: EventsService) {}
+  constructor(
+    private readonly eventsService: EventsService,
+    private readonly cdr: ChangeDetectorRef
+  ) {}
 
   ngAfterViewInit(): void {
     this.map = new maplibregl.Map({
@@ -45,20 +55,34 @@ export class App implements AfterViewInit, OnDestroy {
     this.map.addControl(new maplibregl.NavigationControl(), 'top-right');
     this.map.addControl(new maplibregl.ScaleControl({ unit: 'metric' }), 'bottom-left');
 
-    this.eventsSubscription = this.eventsService
-      .pollEvents(3000, () => this.selectedLastMinutes)
+    this.eventsSubscription = merge(timer(0, 3000), this.refreshTrigger$)
+      .pipe(
+        map(() => this.selectedLastMinutes),
+        switchMap((minutes) =>
+          this.eventsService.getEvents(minutes).pipe(map((events) => ({ events, minutes })))
+        )
+      )
       .subscribe({
-      next: (events) => this.syncMarkers(events),
-      error: (error: unknown) => {
-        console.error('Failed to fetch events:', error);
-      },
-    });
+        next: ({ events, minutes }) => {
+          // Ignore stale responses that return after filter changed.
+          if (minutes !== this.selectedLastMinutes) {
+            return;
+          }
+          this.syncMarkers(events);
+          // Angular 21 app runs without zone.js, so polling callbacks must trigger a render explicitly.
+          this.cdr.detectChanges();
+        },
+        error: (error: unknown) => {
+          console.error('Failed to fetch events:', error);
+        },
+      });
   }
 
   onLastMinutesChange(rawValue: string): void {
     const parsedValue = Number(rawValue);
     if (Number.isFinite(parsedValue) && parsedValue >= 0) {
       this.selectedLastMinutes = parsedValue;
+      this.refreshTrigger$.next();
     }
   }
 
@@ -68,6 +92,8 @@ export class App implements AfterViewInit, OnDestroy {
       marker.remove();
     }
     this.markersByLocationKey.clear();
+    this.markerSignatureByLocationKey.clear();
+    this.refreshTrigger$.complete();
     this.map?.remove();
   }
 
@@ -76,17 +102,24 @@ export class App implements AfterViewInit, OnDestroy {
       return;
     }
 
+    this.events = [...events];
     this.eventCount = events.length;
-    const groupedByLocation = this.getLatestEventsByLocation(events);
+    this.groupedEventsByLocation = this.getLatestEventsByLocation(events);
     const incomingLocationKeys = new Set<string>();
 
-    for (const locationEvents of groupedByLocation.values()) {
+    for (const locationEvents of this.groupedEventsByLocation.values()) {
       incomingLocationKeys.add(locationEvents.key);
+      const nextSignature = this.buildLocationSignature(locationEvents);
 
-      // Recreate marker in case event composition changed (audio/video/latest timestamp).
       const existingMarker = this.markersByLocationKey.get(locationEvents.key);
       if (existingMarker) {
-        existingMarker.remove();
+        const previousSignature = this.markerSignatureByLocationKey.get(locationEvents.key) ?? '';
+        const hasDataChanges = previousSignature !== nextSignature;
+        const applied = this.updateMarker(existingMarker, locationEvents, hasDataChanges);
+        if (!hasDataChanges || applied) {
+          this.markerSignatureByLocationKey.set(locationEvents.key, nextSignature);
+        }
+        continue;
       }
 
       const marker = new maplibregl.Marker({ element: this.buildMarkerElement(locationEvents) })
@@ -95,6 +128,7 @@ export class App implements AfterViewInit, OnDestroy {
         .addTo(this.map);
 
       this.markersByLocationKey.set(locationEvents.key, marker);
+      this.markerSignatureByLocationKey.set(locationEvents.key, nextSignature);
     }
 
     for (const [locationKey, marker] of this.markersByLocationKey.entries()) {
@@ -104,6 +138,7 @@ export class App implements AfterViewInit, OnDestroy {
 
       marker.remove();
       this.markersByLocationKey.delete(locationKey);
+      this.markerSignatureByLocationKey.delete(locationKey);
     }
   }
 
@@ -143,6 +178,59 @@ export class App implements AfterViewInit, OnDestroy {
 
   private buildMarkerElement(locationEvents: EventsAtLocation): HTMLDivElement {
     const markerElement = document.createElement('div');
+    this.applyMarkerAppearance(markerElement, locationEvents);
+
+    return markerElement;
+  }
+
+  private updateMarker(marker: Marker, locationEvents: EventsAtLocation, shouldRefreshPopup: boolean): boolean {
+    marker.setLngLat(locationEvents.coordinates);
+    this.applyMarkerAppearance(marker.getElement(), locationEvents);
+
+    if (!shouldRefreshPopup) {
+      return true;
+    }
+
+    if (this.isMarkerPopupAudioPlaying(marker)) {
+      return false;
+    }
+
+    const popup = marker.getPopup();
+    if (popup) {
+      popup.setDOMContent(this.buildPopupContent(locationEvents));
+    } else {
+      marker.setPopup(new maplibregl.Popup({ offset: 24 }).setDOMContent(this.buildPopupContent(locationEvents)));
+    }
+
+    return true;
+  }
+
+  private isMarkerPopupAudioPlaying(marker: Marker): boolean {
+    const popup = marker.getPopup();
+    if (!popup || !popup.isOpen()) {
+      return false;
+    }
+
+    const popupElement = popup.getElement();
+    const audioElements = popupElement.querySelectorAll('audio');
+    for (const audioElement of Array.from(audioElements)) {
+      if (!audioElement.paused && !audioElement.ended) {
+        return true;
+      }
+    }
+
+    return false;
+  }
+
+  private buildLocationSignature(locationEvents: EventsAtLocation): string {
+    const audioId = locationEvents.audioEvent?.id ?? '';
+    const audioTs = locationEvents.audioEvent ? String(this.getEventTimestampMs(locationEvents.audioEvent)) : '0';
+    const videoId = locationEvents.videoEvent?.id ?? '';
+    const videoTs = locationEvents.videoEvent ? String(this.getEventTimestampMs(locationEvents.videoEvent)) : '0';
+    return `${audioId}:${audioTs}|${videoId}:${videoTs}`;
+  }
+
+  private applyMarkerAppearance(markerElement: HTMLElement, locationEvents: EventsAtLocation): void {
     markerElement.className = 'event-marker';
 
     const hasAudio = Boolean(locationEvents.audioEvent);
@@ -154,8 +242,6 @@ export class App implements AfterViewInit, OnDestroy {
     } else {
       markerElement.classList.add('event-marker-video');
     }
-
-    return markerElement;
   }
 
   private buildPopupContent(locationEvents: EventsAtLocation): HTMLElement {

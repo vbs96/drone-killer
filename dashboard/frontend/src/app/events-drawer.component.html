@@ -1,0 +1,39 @@
+<aside class="events-drawer" aria-label="Recent drone events">
+  <div class="events-drawer-header">
+    <h2>Event Feed</h2>
+    <span>{{ events.length }} events</span>
+  </div>
+
+  <div class="events-list" role="list">
+    @if (events.length === 0) {
+      <p class="events-empty">No events available for this time range.</p>
+    }
+
+    @for (event of events; track trackByEvent($index, event)) {
+      <article class="event-card" role="listitem">
+        <div class="event-card-top">
+          <strong class="event-id">{{ event.id.slice(0, 8) }}</strong>
+          <span class="event-type event-type-{{ getEventType(event).toLowerCase() }}">{{ getEventType(event) }}</span>
+        </div>
+
+        <div class="event-time">{{ event.receivedAt | date: 'medium' }}</div>
+
+        @if (getCoordinatesLabel(event); as coordinatesLabel) {
+          <div class="event-location">{{ coordinatesLabel }}</div>
+        }
+
+        @if (getSnippetUrl(event); as snippetUrl) {
+          <a class="event-snippet-link" [href]="snippetUrl" target="_blank" rel="noopener noreferrer">
+            <img [src]="snippetUrl" alt="Event snippet" loading="lazy" />
+          </a>
+        } @else {
+          <div class="event-no-snippet">No snippet attached</div>
+        }
+
+        @if (getAudioUrl(event); as audioUrl) {
+          <audio controls preload="none" [src]="audioUrl"></audio>
+        }
+      </article>
+    }
+  </div>
+</aside>

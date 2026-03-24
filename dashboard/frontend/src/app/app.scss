@@ -10,6 +10,16 @@
 	background: linear-gradient(180deg, #0d1726 0%, #12253a 100%);
 }
 
+.content {
+	min-height: 0;
+	display: grid;
+	grid-template-columns: minmax(290px, 340px) 1fr;
+}
+
+.drawer {
+	min-height: 0;
+}
+
 .topbar {
 	padding: 0.75rem 1rem;
 	background-color: #0f2238;
@@ -74,6 +84,13 @@
 	min-height: 0;
 }
 
+@media (max-width: 900px) {
+	.content {
+		grid-template-columns: 1fr;
+		grid-template-rows: auto 1fr;
+	}
+}
+
 :host ::ng-deep .event-popup {
 	display: grid;
 	gap: 0.5rem;
@@ -130,9 +147,9 @@
 }
 
 :host ::ng-deep .event-marker-video {
-	background: #e53935;
+	background: #da0b0b;
 }
 
 :host ::ng-deep .event-marker-mixed {
-	background: linear-gradient(90deg, #f3d430 0 50%, #35a853 50% 100%);
+	background: linear-gradient(90deg, #f3d430 0 50%, #da0b0b 50% 100%);
 }
