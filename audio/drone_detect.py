@@ -328,6 +328,7 @@ def main():
 
     ap.add_argument("--audio-queue-size", type=int, default=64, help="Max queued mic chunks")
     ap.add_argument("--post-queue-size", type=int, default=16, help="Max queued post jobs")
+    ap.add_argument("--server-url", type=str, default="http://2doorspacemachine.local:8001/events", help="Server URL for posting detection events")
 
     args = ap.parse_args()
 
@@ -349,7 +350,7 @@ def main():
     chunk_samples = int(args.sr * (args.chunk_ms / 1000.0))
 
     gps_lat, gps_lon = 44.436142, 26.102684
-    server_url = "http://2doorspacemachine.local:8001/events"
+    server_url = args.server_url
 
     out_file = open(args.out, "a", encoding="utf-8") if args.out else None
 
