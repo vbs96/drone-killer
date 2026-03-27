@@ -591,8 +591,11 @@ int main(int argc, char* argv[])
         if (live_mode) {
             cv::imshow("Drone Detection", frame_bgr);
             if (cv::waitKey(1) == 'q') break;
-            std::printf("\rFrame %d  |  %.1f ms  |  %d detection(s)  ",
-                        frame_no, elapsed_ms, count);
+            double avg_ms = total_ms / frame_no;
+            double fps_now = 1000.0 / elapsed_ms;
+            double fps_avg = 1000.0 / avg_ms;
+            std::printf("\rFrame %d  |  %.1f ms (%.1f FPS)  |  avg %.1f FPS  |  %d det  ",
+                        frame_no, elapsed_ms, fps_now, fps_avg, count);
         } else {
             std::printf("\rFrame %d/%d  |  %.1f ms  |  %d detection(s)",
                         frame_no, total, elapsed_ms, count);
@@ -606,8 +609,9 @@ int main(int argc, char* argv[])
     if (live_mode) cv::destroyAllWindows();
 
     if (frame_no > 0) {
-        std::printf("Done. %d frames processed, avg %.1f ms/frame.\n",
-                    frame_no, total_ms / frame_no);
+        double avg_ms = total_ms / frame_no;
+        std::printf("Done. %d frames processed, avg %.1f ms/frame (%.1f FPS).\n",
+                    frame_no, avg_ms, 1000.0 / avg_ms);
     }
     if (output_path) std::cout << "Saved " << output_path << "\n";
 
